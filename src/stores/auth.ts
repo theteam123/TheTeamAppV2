@@ -243,7 +243,8 @@ export const useAuthStore = defineStore('auth', () => {
         email,
         password,
         options: {
-          persistSession: true // Always persist the session when Remember Me is checked
+          // Remove persistSession as it's not a valid option
+          // Session persistence is handled by the Supabase client configuration
         }
       });
 
@@ -263,6 +264,9 @@ export const useAuthStore = defineStore('auth', () => {
       console.log('[Auth] Sign in successful, setting session...');
       state.value.session = data.session;
       state.value.user = data.user as User;
+
+      // Ensure profile exists
+      await ensureProfileExists(data.user.id);
 
       console.log('[Auth] Fetching user data...');
       await Promise.all([
@@ -298,6 +302,40 @@ export const useAuthStore = defineStore('auth', () => {
       throw error;
     } finally {
       state.value.loading = false;
+    }
+  }
+
+  async function ensureProfileExists(userId: string): Promise<void> {
+    try {
+      const { data: existingProfile, error: fetchError } = await supabase
+        .from('profiles')
+        .select('id')
+        .eq('id', userId)
+        .single();
+
+      if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "not found"
+        throw fetchError;
+      }
+
+      if (!existingProfile) {
+        console.log('[Auth] Creating profile for user:', userId);
+        const { error: createError } = await supabase
+          .from('profiles')
+          .insert({
+            id: userId,
+            full_name: state.value.user?.user_metadata?.full_name || '',
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+
+        if (createError) {
+          console.error('[Auth] Error creating profile:', createError);
+          throw createError;
+        }
+      }
+    } catch (error) {
+      console.error('[Auth] Error ensuring profile exists:', error);
+      throw error;
     }
   }
 

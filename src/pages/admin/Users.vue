@@ -1,5 +1,15 @@
 <template>
   <div class="p-8">
+    <!-- Notification -->
+    <div v-if="notification" 
+         class="fixed top-4 right-4 p-4 rounded-lg shadow-lg"
+         :class="{
+           'bg-green-100 text-green-800': notification.type === 'success',
+           'bg-red-100 text-red-800': notification.type === 'error'
+         }">
+      {{ notification.message }}
+    </div>
+
     <!-- Loading State -->
     <div v-if="loading" class="flex justify-center items-center py-8">
       <LoaderIcon class="w-8 h-8 animate-spin text-green-600" />
@@ -43,6 +53,8 @@
               <option value="all">All Status</option>
               <option value="active">Active</option>
               <option value="inactive">Inactive</option>
+              <option value="pending">Pending</option>
+              <option value="invited">Invited</option>
             </select>
             <select
               v-model="roleFilter"
@@ -92,9 +104,14 @@
             </td>
             <td class="px-6 py-4 whitespace-nowrap">
               <span class="px-2 inline-flex text-xs leading-5 font-semibold rounded-full"
-                :class="user.active ? 'bg-green-100 text-green-800' : 'bg-gray-100 text-gray-800'"
+                :class="{
+                  'bg-green-100 text-green-800': user.status === 'active',
+                  'bg-gray-100 text-gray-800': user.status === 'inactive',
+                  'bg-yellow-100 text-yellow-800': user.status === 'pending',
+                  'bg-blue-100 text-blue-800': user.status === 'invited'
+                }"
               >
-                {{ user.active ? 'Active' : 'Inactive' }}
+                {{ user.status }}
               </span>
             </td>
             <td class="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -113,20 +130,28 @@
                 <PencilIcon class="w-5 h-5" />
               </button>
               <button
-                @click="toggleUserStatus(user)"
+                @click="handleToggleStatus(user)"
                 v-if="authStore.hasPermission('users.edit')"
                 class="text-blue-600 hover:text-blue-900 mr-3"
-                :title="user.active ? 'Deactivate User' : 'Activate User'"
+                :title="user.status === 'active' ? 'Deactivate User' : 'Activate User'"
               >
                 <PowerIcon class="w-5 h-5" />
               </button>
               <button
-                @click="deleteUser(user.id)"
+                @click="handleDeleteUser(user.id)"
                 v-if="authStore.hasPermission('users.delete')"
                 class="text-red-600 hover:text-red-900"
                 title="Delete User"
               >
                 <TrashIcon class="w-5 h-5" />
+              </button>
+              <button
+                @click="showStatusHistory(user)"
+                v-if="authStore.hasPermission('users.view')"
+                class="text-gray-600 hover:text-gray-900 ml-3"
+                title="View Status History"
+              >
+                <HistoryIcon class="w-5 h-5" />
               </button>
             </td>
           </tr>
@@ -160,6 +185,13 @@
       @close="closeModal"
       @submit="handleSubmit"
     />
+
+    <!-- Status History Modal -->
+    <StatusHistoryModal
+      v-if="showStatusHistoryModal"
+      :user="selectedUser"
+      @close="closeStatusHistoryModal"
+    />
   </div>
 </template>
 
@@ -179,20 +211,24 @@ import {
   UsersIcon,
   BuildingIcon,
   SearchIcon,
-  PowerIcon
+  PowerIcon,
+  HistoryIcon
 } from 'lucide-vue-next';
 import UserFormModal from '../../components/UserFormModal.vue';
+import StatusHistoryModal from '../../components/admin/StatusHistoryModal.vue';
 import { format } from 'date-fns';
 
 const authStore = useAuthStore();
-const { users, loading, error, fetchUsers, deleteUser } = useUsers();
+const { users, loading, error, fetchUsers, deleteUser, toggleUserStatus } = useUsers();
 const showModal = ref(false);
+const showStatusHistoryModal = ref(false);
 const isEditing = ref(false);
 const selectedUser = ref<CompanyUser | null>(null);
 const searchQuery = ref('');
 const statusFilter = ref('all');
 const roleFilter = ref('all');
 const availableRoles = ref([]);
+const notification = ref<{ type: 'success' | 'error'; message: string } | null>(null);
 
 const formatDate = (date: string) => {
   return format(new Date(date), 'MMM d, yyyy');
@@ -201,42 +237,19 @@ const formatDate = (date: string) => {
 const filteredUsers = computed(() => {
   return users.value.filter(user => {
     const matchesSearch = searchQuery.value === '' || 
-      user.full_name.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
-      user.email.toLowerCase().includes(searchQuery.value.toLowerCase());
+      user.full_name?.toLowerCase().includes(searchQuery.value.toLowerCase()) ||
+      user.email?.toLowerCase().includes(searchQuery.value.toLowerCase());
     
     const matchesStatus = statusFilter.value === 'all' || 
-      (statusFilter.value === 'active' && user.active) ||
-      (statusFilter.value === 'inactive' && !user.active);
+      (statusFilter.value === 'active' && user.status === 'active') ||
+      (statusFilter.value === 'inactive' && user.status === 'inactive');
     
     const matchesRole = roleFilter.value === 'all' || 
-      user.role_id === roleFilter.value;
+      user.role === roleFilter.value;
     
     return matchesSearch && matchesStatus && matchesRole;
   });
 });
-
-const toggleUserStatus = async (user: CompanyUser) => {
-  if (!authStore.hasPermission('users.edit')) {
-    alert('You do not have permission to edit users');
-    return;
-  }
-
-  try {
-    const { error: updateError } = await supabase
-      .from('profiles')
-      .update({ 
-        active: !user.active,
-        updated_at: new Date().toISOString()
-      })
-      .eq('id', user.id);
-
-    if (updateError) throw updateError;
-    await fetchUsers();
-  } catch (err) {
-    console.error('Error toggling user status:', err);
-    alert('Failed to update user status');
-  }
-};
 
 const fetchRoles = async () => {
   try {
@@ -280,6 +293,45 @@ const closeModal = () => {
 const handleSubmit = async () => {
   await fetchUsers();
   closeModal();
+};
+
+const showStatusHistory = (user: CompanyUser) => {
+  selectedUser.value = user;
+  showStatusHistoryModal.value = true;
+};
+
+const closeStatusHistoryModal = () => {
+  showStatusHistoryModal.value = false;
+  selectedUser.value = null;
+};
+
+const showNotification = (type: 'success' | 'error', message: string) => {
+  notification.value = { type, message };
+  setTimeout(() => {
+    notification.value = null;
+  }, 3000);
+};
+
+const handleToggleStatus = async (user: CompanyUser) => {
+  try {
+    await toggleUserStatus(user);
+    showNotification('success', `User status updated to ${user.status === 'active' ? 'active' : 'inactive'}`);
+  } catch (err) {
+    console.error('Error toggling user status:', err);
+    showNotification('error', err instanceof Error ? err.message : 'Failed to update user status');
+  }
+};
+
+const handleDeleteUser = async (userId: string) => {
+  if (!confirm('Are you sure you want to remove this user from the company?')) return;
+  
+  try {
+    await deleteUser(userId);
+    showNotification('success', 'User removed from company successfully');
+  } catch (err) {
+    console.error('Error deleting user:', err);
+    showNotification('error', err instanceof Error ? err.message : 'Failed to delete user');
+  }
 };
 
 onMounted(async () => {

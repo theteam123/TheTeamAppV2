@@ -28,13 +28,26 @@
           <label for="user-role" class="block text-sm font-medium text-gray-700">Role</label>
           <select
             id="user-role"
-            v-model="formData.role_id"
+            v-model="formData.role"
             class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500"
             required
           >
-            <option v-for="role in roles" :key="role.id" :value="role.id">
+            <option v-for="role in roles" :key="role.id" :value="role.name">
               {{ role.name }}
             </option>
+          </select>
+        </div>
+        <div v-if="isEditing">
+          <label for="user-status" class="block text-sm font-medium text-gray-700">Status</label>
+          <select
+            id="user-status"
+            v-model="formData.status"
+            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500"
+          >
+            <option value="active">Active</option>
+            <option value="inactive">Inactive</option>
+            <option value="pending">Pending</option>
+            <option value="invited">Invited</option>
           </select>
         </div>
         <div class="flex justify-end gap-3 mt-6">
@@ -62,11 +75,11 @@
 import { ref, onMounted } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { supabase } from '../lib/supabase';
-import type { Role } from '../lib/types';
+import type { Role, CompanyUser } from '../lib/types';
 
 const props = defineProps<{
   isEditing: boolean;
-  userData: any;
+  userData: CompanyUser | null;
 }>();
 
 const emit = defineEmits<{
@@ -80,14 +93,16 @@ const roles = ref<Role[]>([]);
 const formData = ref({
   full_name: props.userData?.full_name || '',
   email: props.userData?.email || '',
-  role_id: props.userData?.role_id || ''
+  role: props.userData?.role || '',
+  status: props.userData?.status || 'active'
 });
 
 const fetchRoles = async () => {
   try {
     const { data, error } = await supabase
       .from('roles')
-      .select('id, name');
+      .select('id, name, is_system_role')
+      .or(`company_id.eq.${authStore.currentCompanyId},company_id.is.null`);
 
     if (error) throw error;
     roles.value = data;
@@ -99,8 +114,8 @@ const fetchRoles = async () => {
 const handleSubmit = async () => {
   loading.value = true;
   try {
-    if (props.isEditing) {
-      // Update user logic
+    if (props.isEditing && props.userData) {
+      // Update user profile
       const { error: updateError } = await supabase
         .from('profiles')
         .update({ 
@@ -111,15 +126,35 @@ const handleSubmit = async () => {
 
       if (updateError) throw updateError;
 
-      // Update role
-      const { error: roleError } = await supabase
-        .from('user_roles')
+      // Update user company status
+      const { error: statusError } = await supabase
+        .from('user_companies')
         .update({ 
-          role_id: formData.value.role_id,
+          status: formData.value.status,
           updated_at: new Date().toISOString()
         })
         .eq('user_id', props.userData.id)
         .eq('company_id', authStore.currentCompanyId);
+
+      if (statusError) throw statusError;
+
+      // Get the selected role
+      const selectedRole = roles.value.find(r => r.name === formData.value.role);
+      if (!selectedRole) {
+        throw new Error('Selected role not found');
+      }
+
+      // Update role
+      const { error: roleError } = await supabase
+        .from('user_roles')
+        .upsert({ 
+          user_id: props.userData.id,
+          role_id: selectedRole.id,
+          company_id: selectedRole.is_system_role ? null : authStore.currentCompanyId,
+          updated_at: new Date().toISOString()
+        }, {
+          onConflict: 'user_id,role_id'
+        });
 
       if (roleError) throw roleError;
     } else {
@@ -137,7 +172,7 @@ const handleSubmit = async () => {
 
       if (userError) throw userError;
 
-      // Create profile with additional metadata
+      // Create profile
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
@@ -146,19 +181,18 @@ const handleSubmit = async () => {
           email: formData.value.email,
           created_by: authStore.user?.id,
           created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString(),
-          status: 'active',
-          last_login: null
+          updated_at: new Date().toISOString()
         });
 
       if (profileError) throw profileError;
 
-      // Add to company
+      // Add to company with initial status
       const { error: companyError } = await supabase
         .from('user_companies')
         .insert({
           user_id: userData.user.id,
           company_id: authStore.currentCompanyId,
+          status: 'pending', // Initial status for new users
           created_by: authStore.user?.id,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()
@@ -166,13 +200,19 @@ const handleSubmit = async () => {
 
       if (companyError) throw companyError;
 
+      // Get the selected role
+      const selectedRole = roles.value.find(r => r.name === formData.value.role);
+      if (!selectedRole) {
+        throw new Error('Selected role not found');
+      }
+
       // Assign role
       const { error: roleError } = await supabase
         .from('user_roles')
         .insert({
           user_id: userData.user.id,
-          role_id: formData.value.role_id,
-          company_id: authStore.currentCompanyId,
+          role_id: selectedRole.id,
+          company_id: selectedRole.is_system_role ? null : authStore.currentCompanyId,
           created_by: authStore.user?.id,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString()

@@ -59,13 +59,16 @@
 
             <!-- Admin Settings Section -->
             <div class="p-4 border-t border-gray-200">
-              <details class="group">
-                <summary class="flex items-center px-4 py-2 text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-100 rounded-lg">
+              <div class="group">
+                <button 
+                  @click="isAdminMenuOpen = !isAdminMenuOpen"
+                  class="flex items-center px-4 py-2 text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-100 rounded-lg w-full"
+                >
                   <SettingsIcon class="w-5 h-5 mr-3" />
                   Admin Settings
-                  <ChevronDownIcon class="w-4 h-4 ml-auto transition-transform group-open:rotate-180" />
-                </summary>
-                <div class="mt-1 space-y-1">
+                  <ChevronDownIcon class="w-4 h-4 ml-auto transition-transform" :class="{ 'rotate-180': isAdminMenuOpen }" />
+                </button>
+                <div v-if="isAdminMenuOpen" class="mt-1 space-y-1">
                   <router-link 
                     v-for="item in adminItems" 
                     :key="item.path"
@@ -77,7 +80,7 @@
                     {{ item.name }}
                   </router-link>
                 </div>
-              </details>
+              </div>
             </div>
 
             <!-- User Menu -->
@@ -186,6 +189,7 @@ const debouncedSearchQuery = ref('');
 const showSearchResults = ref(false);
 const searchResults = ref<SearchResult[]>([]);
 const searchLoading = ref(false);
+const isAdminMenuOpen = ref(false);
 
 const adminItems = [
   { name: 'Users', path: '/admin/users', icon: UsersIcon, description: 'Manage users and their roles within your organization' },
