@@ -103,7 +103,10 @@ const handleSubmit = async () => {
       // Update user logic
       const { error: updateError } = await supabase
         .from('profiles')
-        .update({ full_name: formData.value.full_name })
+        .update({ 
+          full_name: formData.value.full_name,
+          updated_at: new Date().toISOString()
+        })
         .eq('id', props.userData.id);
 
       if (updateError) throw updateError;
@@ -111,7 +114,10 @@ const handleSubmit = async () => {
       // Update role
       const { error: roleError } = await supabase
         .from('user_roles')
-        .update({ role_id: formData.value.role_id })
+        .update({ 
+          role_id: formData.value.role_id,
+          updated_at: new Date().toISOString()
+        })
         .eq('user_id', props.userData.id)
         .eq('company_id', authStore.currentCompanyId);
 
@@ -121,17 +127,28 @@ const handleSubmit = async () => {
       const { data: userData, error: userError } = await supabase.auth.admin.createUser({
         email: formData.value.email,
         password: Math.random().toString(36).slice(-8), // Generate random password
-        email_confirm: true
+        email_confirm: true,
+        user_metadata: {
+          full_name: formData.value.full_name,
+          created_by: authStore.user?.id,
+          created_at: new Date().toISOString()
+        }
       });
 
       if (userError) throw userError;
 
-      // Create profile
+      // Create profile with additional metadata
       const { error: profileError } = await supabase
         .from('profiles')
         .insert({
           id: userData.user.id,
-          full_name: formData.value.full_name
+          full_name: formData.value.full_name,
+          email: formData.value.email,
+          created_by: authStore.user?.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          status: 'active',
+          last_login: null
         });
 
       if (profileError) throw profileError;
@@ -141,7 +158,10 @@ const handleSubmit = async () => {
         .from('user_companies')
         .insert({
           user_id: userData.user.id,
-          company_id: authStore.currentCompanyId
+          company_id: authStore.currentCompanyId,
+          created_by: authStore.user?.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         });
 
       if (companyError) throw companyError;
@@ -152,7 +172,10 @@ const handleSubmit = async () => {
         .insert({
           user_id: userData.user.id,
           role_id: formData.value.role_id,
-          company_id: authStore.currentCompanyId
+          company_id: authStore.currentCompanyId,
+          created_by: authStore.user?.id,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString()
         });
 
       if (roleError) throw roleError;

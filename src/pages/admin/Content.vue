@@ -144,11 +144,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { useAuthStore } from '../stores/auth';
-import { supabase } from '../lib/supabase';
+import { ref, computed, onMounted } from 'vue';
+import { useAuthStore } from '../../stores/auth';
+import { supabase } from '../../lib/supabase';
 import { format } from 'date-fns';
-import ContentFormModal from '../components/ContentFormModal.vue';
+import ContentFormModal from '../../components/ContentFormModal.vue';
 import {
   FileEditIcon,
   FileIcon,
@@ -164,6 +164,8 @@ import {
   UserIcon,
   FileTypeIcon,
   ExternalLinkIcon,
+  PlusSquareIcon,
+  XIcon
 } from 'lucide-vue-next';
 
 const authStore = useAuthStore();
@@ -187,8 +189,8 @@ const fetchContent = async () => {
         profiles:updated_by (
           full_name
         ),
-        content_tags (
-          tags (
+        content_tags!content_id (
+          tag:tag_id (
             id,
             name,
             color
@@ -203,7 +205,7 @@ const fetchContent = async () => {
     content.value = data.map(item => ({
       ...item,
       updated_by_name: item.profiles?.full_name || 'Unknown',
-      tags: item.content_tags.map(ct => ct.tags)
+      tags: item.content_tags.map(ct => ct.tag)
     }));
   } catch (err) {
     error.value = err.message;

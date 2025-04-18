@@ -2,13 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import type { RouteRecordRaw } from 'vue-router'
 import Home from './pages/Home.vue'
 import Auth from './pages/Auth.vue'
-import Users from './pages/Users.vue'
-import Companies from './pages/Companies.vue'
-import Roles from './pages/Roles.vue'
-import Tags from './pages/Tags.vue'
-import MenuSections from './pages/MenuSections.vue'
-import Content from './pages/Content.vue'
-import EmployeeFeedbackRecords from './pages/EmployeeFeedbackRecords.vue'
+import { useAuthStore } from './stores/auth'
 
 const routes: RouteRecordRaw[] = [
   {
@@ -24,46 +18,49 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: false }
   },
   {
-    path: '/users',
+    path: '/admin/debug',
+    name: 'debug',
+    component: () => import('./pages/admin/Debug.vue'),
+    meta: { requiresAuth: true }
+  },
+  {
+    path: '/admin/users',
     name: 'users',
-    component: Users,
+    component: () => import('./pages/admin/Users.vue'),
     meta: { requiresAuth: true }
   },
   {
-    path: '/companies',
-    name: 'companies',
-    component: Companies,
-    meta: { requiresAuth: true }
-  },
-  {
-    path: '/roles',
+    path: '/admin/roles',
     name: 'roles',
-    component: Roles,
+    component: () => import('./pages/admin/Roles.vue'),
     meta: { requiresAuth: true }
   },
   {
-    path: '/tags',
+    path: '/admin/tags',
     name: 'tags',
-    component: Tags,
+    component: () => import('./pages/admin/Tags.vue'),
     meta: { requiresAuth: true }
   },
   {
-    path: '/menu-sections',
+    path: '/admin/menu-sections',
     name: 'menu-sections',
-    component: MenuSections,
+    component: () => import('./pages/admin/MenuSections.vue'),
     meta: { requiresAuth: true }
   },
   {
-    path: '/content',
+    path: '/admin/content',
     name: 'content',
-    component: Content,
+    component: () => import('./pages/admin/Content.vue'),
     meta: { requiresAuth: true }
   },
   {
-    path: '/feedback-records',
-    name: 'feedback-records',
-    component: EmployeeFeedbackRecords,
-    meta: { requiresAuth: true }
+    path: '/admin/companies',
+    name: 'admin-companies',
+    component: () => import('./pages/admin/Companies.vue'),
+    meta: {
+      requiresAuth: true,
+      requiredPermission: 'manage_companies'
+    }
   },
   {
     path: '/:pathMatch(.*)*',
@@ -75,21 +72,6 @@ const routes: RouteRecordRaw[] = [
 const router = createRouter({
   history: createWebHistory(),
   routes
-})
-
-// Add debug logging
-router.beforeEach((to, from, next) => {
-  console.log('Route navigation:', {
-    to: to.fullPath,
-    from: from.fullPath,
-    toName: to.name,
-    fromName: from.name,
-    availableRoutes: router.getRoutes().map(r => ({
-      path: r.path,
-      name: r.name
-    }))
-  })
-  next()
 })
 
 export default router

@@ -9,7 +9,7 @@
         @click="openCreateTagModal"
         class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2"
       >
-        <PlusSquare class="w-5 h-5" />
+        <TagPlusIcon class="w-5 h-5" />
         Create Tag
       </button>
     </div>
@@ -85,7 +85,7 @@
           @click="openCreateTagModal"
           class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
         >
-          <PlusSquare class="w-5 h-5 mr-2" />
+          <TagPlusIcon class="w-5 h-5 mr-2" />
           Create Tag
         </button>
       </div>
@@ -180,15 +180,16 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
-import { useAuthStore } from '../stores/auth';
-import { supabase } from '../lib/supabase';
+import { ref, computed, onMounted } from 'vue';
+import { useAuthStore } from '../../stores/auth';
+import { supabase } from '../../lib/supabase';
 import {
   TagIcon,
-  PlusSquare,
+  TagPlusIcon,
   PencilIcon,
   TrashIcon,
   LoaderIcon,
+  XIcon,
   HashIcon,
   FolderIcon,
 } from 'lucide-vue-next';
@@ -201,8 +202,6 @@ const showModal = ref(false);
 const isEditing = ref(false);
 
 const availableCategories = [
-  'Documents',
-  'Forms',
   'Records',
   'Users',
   'Companies'

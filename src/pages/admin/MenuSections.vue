@@ -1,3 +1,4 @@
+<!-- Rename Categories.vue to MenuSections.vue with updated content -->
 <template>
   <div class="p-8">
     <!-- Loading State -->
@@ -10,11 +11,11 @@
       {{ error }}
     </div>
 
-    <!-- Categories Grid -->
-    <div v-else-if="categories.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <!-- Menu Sections Grid -->
+    <div v-else-if="menuSections.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       <div
-        v-for="category in categories"
-        :key="category.id"
+        v-for="section in menuSections"
+        :key="section.id"
         class="bg-white rounded-lg shadow-md overflow-hidden"
       >
         <div class="p-6">
@@ -22,24 +23,24 @@
             <div class="flex items-center gap-3">
               <div
                 class="w-8 h-8 rounded-lg flex items-center justify-center"
-                :style="{ backgroundColor: category.color + '20' }"
+                :style="{ backgroundColor: section.color + '20' }"
               >
-                <FolderIcon class="w-5 h-5" :style="{ color: category.color }" />
+                <FolderIcon class="w-5 h-5" :style="{ color: section.color }" />
               </div>
               <div>
-                <h3 class="text-lg font-semibold text-gray-900">{{ category.name }}</h3>
-                <p class="text-sm text-gray-500">{{ category.description }}</p>
+                <h3 class="text-lg font-semibold text-gray-900">{{ section.name }}</h3>
+                <p class="text-sm text-gray-500">{{ section.description }}</p>
               </div>
             </div>
             <div class="flex gap-2">
               <button
-                @click="editCategory(category)"
+                @click="editSection(section)"
                 class="text-gray-400 hover:text-gray-600"
               >
                 <PencilIcon class="w-5 h-5" />
               </button>
               <button
-                @click="deleteCategory(category)"
+                @click="deleteSection(section)"
                 class="text-gray-400 hover:text-red-600"
               >
                 <TrashIcon class="w-5 h-5" />
@@ -50,27 +51,27 @@
           <div class="mt-4">
             <div class="flex items-center gap-2 text-sm text-gray-600">
               <LayoutGridIcon class="w-4 h-4" />
-              <span>{{ category.item_count }} items</span>
+              <span>{{ section.item_count }} items</span>
             </div>
             <div class="flex items-center gap-2 text-sm text-gray-600 mt-1">
               <TagIcon class="w-4 h-4" />
-              <span>{{ category.tags.length }} associated tags</span>
+              <span>{{ section.tags.length }} associated tags</span>
             </div>
-            <div v-if="category.parent_id" class="flex items-center gap-2 text-sm text-gray-600 mt-1">
+            <div v-if="section.parent_id" class="flex items-center gap-2 text-sm text-gray-600 mt-1">
               <FolderTreeIcon class="w-4 h-4" />
-              <span>Subcategory of {{ getCategoryName(category.parent_id) }}</span>
+              <span>Subsection of {{ getSectionName(section.parent_id) }}</span>
             </div>
           </div>
 
-          <div v-if="category.subcategories.length > 0" class="mt-4">
-            <p class="text-sm font-medium text-gray-700 mb-2">Subcategories:</p>
+          <div v-if="section.subsections.length > 0" class="mt-4">
+            <p class="text-sm font-medium text-gray-700 mb-2">Subsections:</p>
             <div class="flex flex-wrap gap-2">
               <span
-                v-for="subcategory in category.subcategories"
-                :key="subcategory.id"
+                v-for="subsection in section.subsections"
+                :key="subsection.id"
                 class="px-2 py-1 text-xs font-medium rounded-full bg-gray-100 text-gray-800"
               >
-                {{ subcategory.name }}
+                {{ subsection.name }}
               </span>
             </div>
           </div>
@@ -80,29 +81,29 @@
 
     <!-- Empty State -->
     <div v-else class="text-center py-12">
-      <TagIcon class="mx-auto h-12 w-12 text-gray-400" />
-      <h3 class="mt-2 text-sm font-medium text-gray-900">No categories</h3>
-      <p class="mt-1 text-sm text-gray-500">Get started by creating a new category.</p>
+      <FolderIcon class="mx-auto h-12 w-12 text-gray-400" />
+      <h3 class="mt-2 text-sm font-medium text-gray-900">No menu sections</h3>
+      <p class="mt-1 text-sm text-gray-500">Get started by creating a new menu section.</p>
       <div class="mt-6">
         <button
-          @click="openCreateCategoryModal"
+          @click="openCreateSectionModal"
           class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
         >
           <FolderPlusIcon class="w-5 h-5 mr-2" />
-          Create Category
+          Create Menu Section
         </button>
       </div>
     </div>
 
-    <!-- Create/Edit Category Modal -->
+    <!-- Create/Edit Menu Section Modal -->
     <div v-if="showModal" class="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center">
       <div class="bg-white rounded-lg p-6 max-w-md w-full">
-        <h2 class="text-xl font-bold mb-4">{{ isEditing ? 'Edit Category' : 'Create New Category' }}</h2>
+        <h2 class="text-xl font-bold mb-4">{{ isEditing ? 'Edit Menu Section' : 'Create New Menu Section' }}</h2>
         <form @submit.prevent="handleSubmit" class="space-y-4">
           <div>
-            <label for="category-name" class="block text-sm font-medium text-gray-700">Category Name</label>
+            <label for="section-name" class="block text-sm font-medium text-gray-700">Section Name</label>
             <input
-              id="category-name"
+              id="section-name"
               type="text"
               v-model="formData.name"
               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500"
@@ -111,9 +112,9 @@
           </div>
 
           <div>
-            <label for="category-description" class="block text-sm font-medium text-gray-700">Description</label>
+            <label for="section-description" class="block text-sm font-medium text-gray-700">Description</label>
             <textarea
-              id="category-description"
+              id="section-description"
               v-model="formData.description"
               rows="2"
               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500"
@@ -121,16 +122,16 @@
           </div>
 
           <div>
-            <label for="category-color" class="block text-sm font-medium text-gray-700">Color</label>
+            <label for="section-color" class="block text-sm font-medium text-gray-700">Color</label>
             <div class="mt-1 flex gap-2">
               <input
-                id="category-color"
+                id="section-color"
                 type="color"
                 v-model="formData.color"
                 class="h-9 w-16 rounded border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500"
               />
               <input
-                id="category-color-hex"
+                id="section-color-hex"
                 type="text"
                 v-model="formData.color"
                 class="flex-1 rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500"
@@ -141,19 +142,19 @@
           </div>
 
           <div>
-            <label for="category-parent" class="block text-sm font-medium text-gray-700">Parent Category</label>
+            <label for="section-parent" class="block text-sm font-medium text-gray-700">Parent Section</label>
             <select
-              id="category-parent"
+              id="section-parent"
               v-model="formData.parent_id"
               class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500"
             >
               <option value="">None (Top Level)</option>
               <option
-                v-for="category in availableParentCategories"
-                :key="category.id"
-                :value="category.id"
+                v-for="section in availableParentSections"
+                :key="section.id"
+                :value="section.id"
               >
-                {{ category.name }}
+                {{ section.name }}
               </option>
             </select>
           </div>
@@ -202,8 +203,8 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue';
-import { useAuthStore } from '../stores/auth';
-import { supabase } from '../lib/supabase';
+import { useAuthStore } from '../../stores/auth';
+import { supabase } from '../../lib/supabase';
 import {
   FolderIcon,
   FolderPlusIcon,
@@ -218,7 +219,7 @@ import {
 const authStore = useAuthStore();
 const loading = ref(false);
 const error = ref(null);
-const categories = ref([]);
+const menuSections = ref([]);
 const availableTags = ref([]);
 const showModal = ref(false);
 const isEditing = ref(false);
@@ -232,22 +233,22 @@ const formData = ref({
   tag_ids: [] as string[]
 });
 
-const availableParentCategories = computed(() => {
-  if (!isEditing.value) return categories.value;
-  return categories.value.filter(c => c.id !== formData.value.id);
+const availableParentSections = computed(() => {
+  if (!isEditing.value) return menuSections.value;
+  return menuSections.value.filter(c => c.id !== formData.value.id);
 });
 
-const fetchCategories = async () => {
+const fetchMenuSections = async () => {
   if (!authStore.currentCompanyId) return;
   
   loading.value = true;
   try {
     const { data, error: fetchError } = await supabase
-      .from('categories')
+      .from('menu_sections')
       .select(`
         *,
-        subcategories:categories!parent_id(id, name),
-        tags:category_tags(
+        subsections:menu_sections!parent_id(id, name),
+        tags:menu_section_tags(
           tag:tags(
             id,
             name
@@ -258,11 +259,11 @@ const fetchCategories = async () => {
 
     if (fetchError) throw fetchError;
 
-    categories.value = data.map(category => ({
-      ...category,
-      item_count: 0, // Since category_items table doesn't exist in schema
-      tags: category.tags.map(ct => ct.tag),
-      subcategories: category.subcategories || []
+    menuSections.value = data.map(section => ({
+      ...section,
+      item_count: 0,
+      tags: section.tags.map(ct => ct.tag),
+      subsections: section.subsections || []
     }));
   } catch (err) {
     error.value = err.message;
@@ -285,11 +286,11 @@ const fetchTags = async () => {
   }
 };
 
-const getCategoryName = (categoryId: string) => {
-  return categories.value.find(c => c.id === categoryId)?.name || '';
+const getSectionName = (sectionId: string) => {
+  return menuSections.value.find(s => s.id === sectionId)?.name || '';
 };
 
-const openCreateCategoryModal = () => {
+const openCreateSectionModal = () => {
   isEditing.value = false;
   formData.value = {
     id: '',
@@ -302,15 +303,15 @@ const openCreateCategoryModal = () => {
   showModal.value = true;
 };
 
-const editCategory = (category) => {
+const editSection = (section) => {
   isEditing.value = true;
   formData.value = {
-    id: category.id,
-    name: category.name,
-    description: category.description || '',
-    color: category.color,
-    parent_id: category.parent_id || '',
-    tag_ids: category.tags.map(t => t.id)
+    id: section.id,
+    name: section.name,
+    description: section.description || '',
+    color: section.color,
+    parent_id: section.parent_id || '',
+    tag_ids: section.tags.map(t => t.id)
   };
   showModal.value = true;
 };
@@ -318,7 +319,7 @@ const editCategory = (category) => {
 const handleSubmit = async () => {
   loading.value = true;
   try {
-    const categoryData = {
+    const sectionData = {
       name: formData.value.name,
       description: formData.value.description,
       color: formData.value.color,
@@ -326,51 +327,51 @@ const handleSubmit = async () => {
       company_id: authStore.currentCompanyId
     };
 
-    let categoryId;
+    let sectionId;
 
     if (isEditing.value) {
       const { error: updateError } = await supabase
-        .from('categories')
-        .update(categoryData)
+        .from('menu_sections')
+        .update(sectionData)
         .eq('id', formData.value.id);
 
       if (updateError) throw updateError;
-      categoryId = formData.value.id;
+      sectionId = formData.value.id;
 
       // Delete existing tag associations
       const { error: deleteError } = await supabase
-        .from('category_tags')
+        .from('menu_section_tags')
         .delete()
-        .eq('category_id', categoryId);
+        .eq('menu_section_id', sectionId);
 
       if (deleteError) throw deleteError;
     } else {
-      const { data: newCategory, error: insertError } = await supabase
-        .from('categories')
-        .insert(categoryData)
+      const { data: newSection, error: insertError } = await supabase
+        .from('menu_sections')
+        .insert(sectionData)
         .select()
         .single();
 
       if (insertError) throw insertError;
-      categoryId = newCategory.id;
+      sectionId = newSection.id;
     }
 
     // Create new tag associations
     if (formData.value.tag_ids.length > 0) {
       const tagAssociations = formData.value.tag_ids.map(tagId => ({
-        category_id: categoryId,
+        menu_section_id: sectionId,
         tag_id: tagId
       }));
 
       const { error: tagError } = await supabase
-        .from('category_tags')
+        .from('menu_section_tags')
         .insert(tagAssociations);
 
       if (tagError) throw tagError;
     }
 
     showModal.value = false;
-    await fetchCategories();
+    await fetchMenuSections();
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -378,18 +379,18 @@ const handleSubmit = async () => {
   }
 };
 
-const deleteCategory = async (category) => {
-  if (!confirm('Are you sure you want to delete this category? This action cannot be undone.')) return;
+const deleteSection = async (section) => {
+  if (!confirm('Are you sure you want to delete this menu section? This action cannot be undone.')) return;
 
   loading.value = true;
   try {
     const { error: err } = await supabase
-      .from('categories')
+      .from('menu_sections')
       .delete()
-      .eq('id', category.id);
+      .eq('id', section.id);
 
     if (err) throw err;
-    await fetchCategories();
+    await fetchMenuSections();
   } catch (err) {
     error.value = err.message;
   } finally {
@@ -398,6 +399,6 @@ const deleteCategory = async (category) => {
 };
 
 onMounted(async () => {
-  await Promise.all([fetchCategories(), fetchTags()]);
+  await Promise.all([fetchMenuSections(), fetchTags()]);
 });
 </script>

@@ -247,9 +247,9 @@
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted } from 'vue';
-import { useAuthStore } from '../stores/auth';
-import { supabase } from '../lib/supabase';
+import { ref, computed, watch, onMounted } from 'vue';
+import { useAuthStore } from '../../stores/auth';
+import { supabase } from '../../lib/supabase';
 import { format } from 'date-fns';
 import {
   ShieldIcon,
@@ -388,40 +388,59 @@ const displayedPages = computed(() => {
 
 // Methods
 const fetchRoles = async () => {
-  if (!authStore.currentCompanyId) {
-    error.value = 'No company selected';
-    return;
-  }
-
-  loading.value = true;
   try {
-    const { data: rolesData, error: rolesError } = await supabase
-      .from('roles')
+    loading.value = true
+    error.value = null
+
+    if (!authStore.currentCompanyId) {
+      throw new Error('No company selected')
+    }
+
+    const { data, error: fetchError } = await supabase
+      .from('user_roles')
       .select(`
-        *,
-        role_permissions (
-          permission_key
-        ),
-        user_roles (
-          count
-        )
+        role_id,
+        count(*)
       `)
-      .eq('company_id', authStore.currentCompanyId);
+      .eq('company_id', authStore.currentCompanyId)
+      .group('role_id')
 
-    if (rolesError) throw rolesError;
+    if (fetchError) {
+      throw fetchError
+    }
 
-    roles.value = rolesData.map(role => ({
-      ...role,
-      permissions: role.role_permissions.map(rp => rp.permission_key),
-      user_count: role.user_roles[0]?.count || 0
-    }));
-  } catch (err: any) {
-    console.error('Error fetching roles:', err);
-    error.value = err.message;
+    if (!data) {
+      roles.value = []
+      return
+    }
+
+    // Map the data to include role details
+    const roleIds = data.map(item => item.role_id)
+    if (roleIds.length > 0) {
+      const { data: roleData, error: roleError } = await supabase
+        .from('roles')
+        .select('*')
+        .in('id', roleIds)
+
+      if (roleError) {
+        throw roleError
+      }
+
+      roles.value = roleData.map(role => ({
+        ...role,
+        user_count: data.find(item => item.role_id === role.id)?.count || 0
+      }))
+    } else {
+      roles.value = []
+    }
+
+  } catch (err) {
+    error.value = err instanceof Error ? err.message : 'Failed to fetch roles'
+    console.error('Error fetching roles:', err)
   } finally {
-    loading.value = false;
+    loading.value = false
   }
-};
+}
 
 const openCreateRoleModal = () => {
   if (!authStore.hasPermission('roles.create')) {
