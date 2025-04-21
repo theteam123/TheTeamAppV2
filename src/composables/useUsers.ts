@@ -1,51 +1,54 @@
 import { ref } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { supabase } from '../lib/supabase';
-import type { User, Profile, UserRole } from '../lib/types';
 
-interface Role {
-  name: string;
-}
-
-interface RoleData {
-  user_id: string;
-  role_id: string;
-  roles: {
-    name: string;
-  };
+interface UserProfile {
+  id: string;
+  full_name: string;
+  email: string;
+  avatar_url: string | null;
+  created_at: string;
 }
 
 interface UserCompany {
   user_id: string;
-  company_id: string;
   status: 'active' | 'inactive' | 'pending' | 'invited';
-  profiles: Profile;
-  user_roles: UserRole[];
+  profiles: UserProfile;
 }
 
-export const useUsers = () => {
-  const authStore = useAuthStore()
-  const users = ref<User[]>([])
-  const loading = ref(false)
-  const error = ref<string | null>(null)
+interface UserRole {
+  name: string;
+  user_roles: { user_id: string }[];
+}
+
+interface ExtendedUser {
+  id: string;
+  full_name: string;
+  email: string;
+  avatar_url: string | null;
+  status: 'active' | 'inactive' | 'pending' | 'invited';
+  created_at: string;
+  role: string;
+}
+
+export function useUsers() {
+  const users = ref<ExtendedUser[]>([]);
+  const loading = ref(false);
+  const error = ref<string | null>(null);
+  const authStore = useAuthStore();
 
   const fetchUsers = async () => {
+    loading.value = true;
+    error.value = null;
+
     try {
-      loading.value = true
-      error.value = null
-
-      // Check if we have a valid company ID
-      if (!authStore.currentCompanyId) {
-        throw new Error('No company selected')
-      }
-
-      // First fetch users with their profiles and status
-      const { data: userData, error: userError } = await supabase
+      // First get the user_companies for the current company
+      const { data, error: userCompaniesError } = await supabase
         .from('user_companies')
         .select(`
           user_id,
           status,
-          profiles!inner (
+          profiles!inner(
             id,
             full_name,
             email,
@@ -53,90 +56,71 @@ export const useUsers = () => {
             created_at
           )
         `)
-        .eq('company_id', authStore.currentCompanyId)
+        .eq('company_id', authStore.currentCompanyId);
 
-      if (userError) {
-        throw userError
-      }
+      if (userCompaniesError) throw userCompaniesError;
+      
+      const userCompanies = data as unknown as UserCompany[];
 
-      if (!userData) {
-        users.value = []
-        return
-      }
-
-      // Then fetch roles for these users
-      const userIds = userData.map(user => user.user_id)
-      const { data: roleData, error: roleError } = await supabase
-        .from('user_roles')
+      // Then get the roles for these users
+      const userIds = userCompanies.map(uc => uc.user_id);
+      const { data: roleData, error: userRolesError } = await supabase
+        .from('roles')
         .select(`
-          user_id,
-          role_id,
-          roles (
-            name
-          )
+          name,
+          user_roles!inner(user_id)
         `)
-        .in('user_id', userIds)
-        .eq('company_id', authStore.currentCompanyId)
+        .in('user_roles.user_id', userIds)
+        .eq('user_roles.company_id', authStore.currentCompanyId);
 
-      if (roleError) {
-        throw roleError
-      }
+      if (userRolesError) throw userRolesError;
+      
+      const userRoles = roleData as unknown as UserRole[];
 
-      // Create a map of user_id to role name
-      const roleMap = new Map()
-      if (roleData) {
-        const typedRoleData = roleData as unknown as RoleData[]
-        typedRoleData.forEach(role => {
-          roleMap.set(role.user_id, role.roles?.name || 'user')
-        })
-      }
-
-      // Transform the data to match User interface
-      users.value = userData.map(user => ({
-        id: user.user_id,
-        full_name: user.profiles.full_name,
-        email: user.profiles.email,
-        avatar_url: user.profiles.avatar_url,
-        created_at: user.profiles.created_at,
-        role: roleMap.get(user.user_id) || 'user',
-        status: user.status
-      }))
+      // Combine the data
+      users.value = userCompanies.map(uc => ({
+        id: uc.profiles.id,
+        full_name: uc.profiles.full_name,
+        email: uc.profiles.email,
+        avatar_url: uc.profiles.avatar_url,
+        status: uc.status,
+        created_at: uc.profiles.created_at,
+        role: userRoles.find(ur => ur.user_roles.some(r => r.user_id === uc.user_id))?.name || 'No Role'
+      }));
 
     } catch (err) {
-      console.error('Error fetching users:', err)
-      error.value = err instanceof Error ? err.message : 'Failed to fetch users'
-      users.value = []
+      console.error('Error fetching users:', err);
+      error.value = err instanceof Error ? err.message : 'Failed to fetch users';
     } finally {
-      loading.value = false
+      loading.value = false;
     }
-  }
+  };
 
-  const toggleUserStatus = async (user: User) => {
-    if (!authStore.hasPermission('users.edit')) {
-      throw new Error('You do not have permission to edit users')
+  const toggleUserStatus = async (user: ExtendedUser) => {
+    if (!authStore.hasPermission('users.edit') && !authStore.hasPermission('company.users.edit')) {
+      throw new Error('You do not have permission to edit users');
     }
 
     try {
+      const newStatus = user.status === 'active' ? 'inactive' : 'active';
       const { error: updateError } = await supabase
         .from('user_companies')
-        .update({ 
-          status: user.status === 'active' ? 'inactive' : 'active',
-          updated_at: new Date().toISOString()
-        })
+        .update({ status: newStatus })
         .eq('user_id', user.id)
-        .eq('company_id', authStore.currentCompanyId)
+        .eq('company_id', authStore.currentCompanyId);
 
-      if (updateError) throw updateError
-      await fetchUsers()
+      if (updateError) throw updateError;
+      user.status = newStatus;
+      await fetchUsers();
     } catch (err) {
-      console.error('Error toggling user status:', err)
-      throw err
+      console.error('Error toggling user status:', err);
+      throw err;
     }
-  }
+  };
 
   const deleteUser = async (userId: string) => {
-    if (!authStore.hasPermission('users.delete')) {
-      throw new Error('You do not have permission to delete users')
+    if (!authStore.hasPermission('users.delete') && !authStore.hasPermission('company.users.delete')) {
+      throw new Error('You do not have permission to delete users');
     }
 
     try {
@@ -144,15 +128,15 @@ export const useUsers = () => {
         .from('user_companies')
         .delete()
         .eq('user_id', userId)
-        .eq('company_id', authStore.currentCompanyId)
+        .eq('company_id', authStore.currentCompanyId);
 
-      if (deleteError) throw deleteError
-      await fetchUsers()
+      if (deleteError) throw deleteError;
+      await fetchUsers();
     } catch (err) {
-      console.error('Error deleting user:', err)
-      throw err
+      console.error('Error deleting user:', err);
+      throw err;
     }
-  }
+  };
 
   return {
     users,
@@ -161,5 +145,5 @@ export const useUsers = () => {
     fetchUsers,
     toggleUserStatus,
     deleteUser
-  }
+  };
 }

@@ -18,6 +18,7 @@ export interface Profile {
   avatar_url?: string;
   current_company_id?: string;
   email?: string;
+  company_ids?: string[];
 }
 
 export interface Role {
@@ -62,9 +63,10 @@ export interface Company {
   id: string;
   name: string;
   website?: string;
-  settings?: Record<string, any>;
+  settings?: any;
   created_at: string;
   updated_at: string;
+  archived_at?: string | null;
 }
 
 export interface AuditDetails {

@@ -32,6 +32,7 @@
             class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500"
             required
           >
+            <option value="">Select a role</option>
             <option v-for="role in roles" :key="role.id" :value="role.name">
               {{ role.name }}
             </option>
@@ -72,7 +73,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted } from 'vue';
+import { ref, onMounted, watch } from 'vue';
 import { useAuthStore } from '../stores/auth';
 import { supabase } from '../lib/supabase';
 import type { Role, CompanyUser } from '../lib/types';
@@ -97,17 +98,31 @@ const formData = ref({
   status: props.userData?.status || 'active'
 });
 
+// Watch for userData changes to update formData
+watch(() => props.userData, (newUserData) => {
+  if (newUserData) {
+    formData.value = {
+      full_name: newUserData.full_name || '',
+      email: newUserData.email || '',
+      role: newUserData.role || '',
+      status: newUserData.status || 'active'
+    };
+  }
+}, { immediate: true });
+
 const fetchRoles = async () => {
   try {
     const { data, error } = await supabase
       .from('roles')
-      .select('id, name, is_system_role')
-      .or(`company_id.eq.${authStore.currentCompanyId},company_id.is.null`);
+      .select('id, name')
+      .or(`company_id.eq.${authStore.currentCompanyId},is_system_role.eq.true`)
+      .order('name');
 
     if (error) throw error;
-    roles.value = data;
+    roles.value = data || [];
   } catch (err) {
     console.error('Error fetching roles:', err);
+    roles.value = [];
   }
 };
 
@@ -115,23 +130,47 @@ const handleSubmit = async () => {
   loading.value = true;
   try {
     if (props.isEditing && props.userData) {
-      // Update user profile
-      const { error: updateError } = await supabase
+      // First check if profile exists
+      const { data: existingProfile, error: profileError } = await supabase
         .from('profiles')
-        .update({ 
-          full_name: formData.value.full_name,
-          updated_at: new Date().toISOString()
-        })
-        .eq('id', props.userData.id);
+        .select('id')
+        .eq('id', props.userData.id)
+        .single();
 
-      if (updateError) throw updateError;
+      if (profileError && profileError.code !== 'PGRST116') { // PGRST116 is "not found"
+        throw profileError;
+      }
+
+      // If profile doesn't exist, create it
+      if (!existingProfile) {
+        const { error: createError } = await supabase
+          .from('profiles')
+          .insert({
+            id: props.userData.id,
+            full_name: formData.value.full_name,
+            created_at: new Date().toISOString(),
+            updated_at: new Date().toISOString()
+          });
+
+        if (createError) throw createError;
+      } else {
+        // Update existing profile
+        const { error: updateError } = await supabase
+          .from('profiles')
+          .update({ 
+            full_name: formData.value.full_name,
+            updated_at: new Date().toISOString()
+          })
+          .eq('id', props.userData.id);
+
+        if (updateError) throw updateError;
+      }
 
       // Update user company status
       const { error: statusError } = await supabase
         .from('user_companies')
         .update({ 
-          status: formData.value.status,
-          updated_at: new Date().toISOString()
+          status: formData.value.status
         })
         .eq('user_id', props.userData.id)
         .eq('company_id', authStore.currentCompanyId);
@@ -150,75 +189,40 @@ const handleSubmit = async () => {
         .upsert({ 
           user_id: props.userData.id,
           role_id: selectedRole.id,
-          company_id: selectedRole.is_system_role ? null : authStore.currentCompanyId,
-          updated_at: new Date().toISOString()
+          company_id: selectedRole.is_system_role ? null : authStore.currentCompanyId
         }, {
           onConflict: 'user_id,role_id'
         });
 
       if (roleError) throw roleError;
     } else {
-      // Create user logic
-      const { data: userData, error: userError } = await supabase.auth.admin.createUser({
-        email: formData.value.email,
-        password: Math.random().toString(36).slice(-8), // Generate random password
-        email_confirm: true,
-        user_metadata: {
-          full_name: formData.value.full_name,
-          created_by: authStore.user?.id,
-          created_at: new Date().toISOString()
-        }
-      });
-
-      if (userError) throw userError;
-
-      // Create profile
-      const { error: profileError } = await supabase
-        .from('profiles')
-        .insert({
-          id: userData.user.id,
-          full_name: formData.value.full_name,
-          email: formData.value.email,
-          created_by: authStore.user?.id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-
-      if (profileError) throw profileError;
-
-      // Add to company with initial status
-      const { error: companyError } = await supabase
-        .from('user_companies')
-        .insert({
-          user_id: userData.user.id,
-          company_id: authStore.currentCompanyId,
-          status: 'pending', // Initial status for new users
-          created_by: authStore.user?.id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
-
-      if (companyError) throw companyError;
-
       // Get the selected role
       const selectedRole = roles.value.find(r => r.name === formData.value.role);
       if (!selectedRole) {
         throw new Error('Selected role not found');
       }
 
-      // Assign role
-      const { error: roleError } = await supabase
-        .from('user_roles')
-        .insert({
-          user_id: userData.user.id,
+      // Call the Edge Function to create the user
+      const response = await fetch(`${import.meta.env.VITE_SUPABASE_URL}/functions/v1/admin-create-user`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${(await supabase.auth.getSession()).data.session?.access_token}`
+        },
+        body: JSON.stringify({
+          email: formData.value.email,
+          password: Math.random().toString(36).slice(-8), // Generate random password
+          full_name: formData.value.full_name,
           role_id: selectedRole.id,
-          company_id: selectedRole.is_system_role ? null : authStore.currentCompanyId,
-          created_by: authStore.user?.id,
-          created_at: new Date().toISOString(),
-          updated_at: new Date().toISOString()
-        });
+          company_id: authStore.currentCompanyId,
+          created_by: authStore.user?.id
+        })
+      });
 
-      if (roleError) throw roleError;
+      if (!response.ok) {
+        const error = await response.json();
+        throw new Error(error.error || 'Failed to create user');
+      }
     }
 
     emit('submit');

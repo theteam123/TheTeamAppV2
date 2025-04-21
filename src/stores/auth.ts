@@ -12,6 +12,46 @@ class AuthError extends Error {
   }
 }
 
+// Helper function to format errors in plain English
+function formatError(error: any): string {
+  console.log('[Auth Debug] Raw error:', error);
+  
+  // Handle Supabase PostgREST errors
+  if (error.code === 'PGRST116') {
+    return 'No profile found for this user. This is normal for new users.';
+  }
+  
+  if (error.code === '23505') {
+    return 'A profile with this email already exists. Please contact support if this is unexpected.';
+  }
+  
+  // Handle common Supabase auth errors
+  if (error.message?.includes('Invalid login credentials')) {
+    return 'The email or password you entered is incorrect.';
+  }
+  
+  if (error.message?.includes('Email not confirmed')) {
+    return 'Please check your email to confirm your account before signing in.';
+  }
+  
+  if (error.message?.includes('User not found')) {
+    return 'No account found with this email address.';
+  }
+  
+  // Handle network errors
+  if (error.message?.includes('Failed to fetch')) {
+    return 'Unable to connect to the server. Please check your internet connection.';
+  }
+  
+  // Handle permission errors
+  if (error.message?.includes('permission denied')) {
+    return 'You do not have permission to perform this action.';
+  }
+  
+  // Default case - return the error message if it exists, otherwise a generic message
+  return error.message || 'An unexpected error occurred. Please try again.';
+}
+
 interface Company {
   id: string;
   name: string;
@@ -74,6 +114,38 @@ interface UserCompany {
   company_id: string;
 }
 
+// Add cache interface
+interface AuthCache {
+  profile: Profile | null;
+  roles: Role[];
+  permissions: string[];
+  lastUpdated: number;
+}
+
+// Add cache state
+const cache = ref<AuthCache>({
+  profile: null,
+  roles: [],
+  permissions: [],
+  lastUpdated: 0
+});
+
+// Cache duration in milliseconds (5 minutes)
+const CACHE_DURATION = 5 * 60 * 1000;
+
+// Helper function to check if cache is valid
+function isCacheValid(): boolean {
+  return Date.now() - cache.value.lastUpdated < CACHE_DURATION;
+}
+
+// Add type for the get_user_roles function response
+interface UserRoleResponse {
+  role_id: string;
+  role_name: string;
+  is_system_role: boolean;
+  permissions: { permission_key: string }[];  // Add permissions field
+}
+
 export const useAuthStore = defineStore('auth', () => {
   const state = ref<AuthState>({
     user: null,
@@ -88,72 +160,113 @@ export const useAuthStore = defineStore('auth', () => {
     success: null
   });
 
-  // Set up Supabase auth state listener
-  supabase.auth.onAuthStateChange(async (event, session) => {
-    console.log('[Auth] Auth state change:', { event, session: !!session });
+  // Function definitions
+  function resetState(): void {
+    console.log('[Auth] Resetting state...');
+    state.value = {
+      user: null,
+      session: null,
+      roles: [],
+      permissions: [],
+      loading: false,
+      profile: null,
+      error: null,
+      availableCompanies: [],
+      needsCompanySelection: false,
+      success: null
+    };
+    clearCache();
+    console.log('[Auth] State reset complete');
+  }
+
+  async function setSession(session: Session) {
+    console.log('[Auth] Setting session:', { user: session?.user?.email });
     state.value.loading = true;
     try {
-      if (session) {
-        state.value.session = session;
-        state.value.user = session.user as User;
-        // Fetch additional user data
-        await Promise.all([
-          fetchUserProfile(),
-          fetchAvailableCompanies(),
-          fetchUserRolesAndPermissions()
-        ]);
-      } else {
-        resetState();
+      state.value.session = session;
+      state.value.user = session?.user as User || null;
+
+      if (session?.user) {
+        // Ensure profile exists first
+        await ensureProfileExists(session.user.id);
+        
+        // Fetch profile
+        await fetchUserProfile();
+        
+        // Fetch roles first, as we need to know if user is system role
+        await fetchUserRoles();
+        
+        // Then fetch companies
+        await fetchAvailableCompanies();
+
+        // Check if user has system role
+        const hasSystemRole = state.value.roles.some(role => role.name === 'App_Admin');
+        
+        // Only handle company selection for non-system roles
+        if (!hasSystemRole && !state.value.profile?.current_company_id && state.value.availableCompanies.length > 0) {
+          if (state.value.availableCompanies.length === 1) {
+            await setCurrentCompany(state.value.availableCompanies[0].id);
+          } else {
+            state.value.needsCompanySelection = true;
+          }
+        }
       }
     } catch (error) {
-      console.error('[Auth] Error in auth state change:', error);
+      console.error('[Auth] Error setting session:', error);
       resetState();
+      throw error;
     } finally {
       state.value.loading = false;
     }
-  });
+  }
 
-  const isAuthenticated = computed(() => {
-    const authenticated = !!state.value.session && !!state.value.user;
-    console.log('[Auth] Checking authentication status:', {
-      session: !!state.value.session,
-      user: !!state.value.user,
-      authenticated
+  function clearError(): void {
+    state.value.error = null;
+  }
+
+  // Set up Supabase auth state listener
+  function registerAuthListener() {
+    supabase.auth.onAuthStateChange(async (event, session) => {
+      console.log('[Auth] Auth state change:', { event, session: !!session });
+      state.value.loading = true;
+
+      try {
+        if (session) {
+          state.value.session = session;
+          state.value.user = session.user as User;
+
+          // Ensure profile exists first
+          await ensureProfileExists(session.user.id);
+
+          // Then load all data in parallel
+          await Promise.all([
+            fetchUserProfile(),
+            fetchUserRoles(),
+            fetchAvailableCompanies()
+          ]);
+
+          // Check if user has system role
+          const hasSystemRole = state.value.roles.some(role => role.name === 'App_Admin');
+          
+          // Only handle company selection for non-system roles
+          if (!hasSystemRole && !state.value.profile?.current_company_id && state.value.availableCompanies.length > 0) {
+            if (state.value.availableCompanies.length === 1) {
+              await setCurrentCompany(state.value.availableCompanies[0].id);
+            } else {
+              state.value.needsCompanySelection = true;
+            }
+          }
+        } else {
+          resetState();
+        }
+      } catch (error) {
+        console.error('[Auth] Error in auth state change:', error);
+        resetState();
+      } finally {
+        state.value.loading = false;
+      }
     });
-    return authenticated;
-  });
-
-  const hasPermission = computed(() => (permission: string) => {
-    console.log('[Auth] Checking permission:', permission);
-    return state.value.permissions.includes(permission);
-  });
-
-  const currentCompany = computed(() => {
-    console.log('[Auth] Getting current company:', state.value.profile?.current_company_id);
-    return state.value.profile?.current_company_id;
-  });
-
-  const userRole = computed(() => {
-    // Log all roles for debugging
-    console.log('[Auth] All roles:', state.value.roles);
-
-    // Find system role first (like SuperAdmin)
-    const systemRole = state.value.roles.find(r => r.is_system_role);
-    if (systemRole) {
-      console.log('[Auth] Found system role:', systemRole.name);
-      return systemRole.name;
-    }
-
-    // Fall back to first company role or 'User'
-    const companyRole = state.value.roles[0];
-    const roleName = companyRole?.name || 'User';
-    console.log('[Auth] Using company role or default:', roleName);
-    return roleName;
-  });
-
-  const currentCompanyId = computed(() => {
-    return state.value.profile?.current_company_id;
-  });
+  }
 
   async function initialize(): Promise<void> {
     console.log('[Auth Debug] Starting initialization...', {
@@ -186,16 +299,19 @@ export const useAuthStore = defineStore('auth', () => {
         state.value.user = session.user as User;
 
         console.log('[Auth Debug] Fetching user data...');
-        await Promise.all([
-          fetchUserProfile(),
-          fetchAvailableCompanies()
-        ]);
+        // First fetch profile
+        await fetchUserProfile();
+        
+        // Always fetch available companies
+        await fetchAvailableCompanies();
 
-        console.log('[Auth Debug] Profile loaded:', {
+        console.log('[Auth Debug] Profile and companies loaded:', {
           hasProfile: !!state.value.profile,
-          companyCount: state.value.availableCompanies.length
+          companyCount: state.value.availableCompanies.length,
+          currentCompanyId: state.value.profile?.current_company_id
         });
 
+        // Handle company selection if needed
         if (!state.value.profile?.current_company_id) {
           if (state.value.availableCompanies.length === 1) {
             console.log('[Auth Debug] Single company available, auto-selecting...');
@@ -207,9 +323,10 @@ export const useAuthStore = defineStore('auth', () => {
           }
         }
 
+        // Only fetch roles if we have a selected company
         if (state.value.profile?.current_company_id) {
           console.log('[Auth Debug] Fetching roles and permissions...');
-          await fetchUserRolesAndPermissions();
+          await fetchUserRoles();
           console.log('[Auth Debug] Roles loaded:', {
             rolesCount: state.value.roles.length,
             permissionsCount: state.value.permissions.length
@@ -249,9 +366,10 @@ export const useAuthStore = defineStore('auth', () => {
       });
 
       if (error) {
-        console.error('[Auth] Sign in error:', error.message);
-        state.value.error = error.message;
-        throw new AuthError(error.message);
+        const friendlyError = formatError(error);
+        console.error('[Auth] Sign in error:', friendlyError);
+        state.value.error = friendlyError;
+        throw new AuthError(friendlyError);
       }
 
       if (!data.session) {
@@ -265,41 +383,51 @@ export const useAuthStore = defineStore('auth', () => {
       state.value.session = data.session;
       state.value.user = data.user as User;
 
-      // Ensure profile exists
-      await ensureProfileExists(data.user.id);
+      // Try to fetch profile, but don't fail if it doesn't exist
+      try {
+        await ensureProfileExists(data.user.id);
+      } catch (error) {
+        const friendlyError = formatError(error);
+        console.warn('[Auth] Profile fetch failed, continuing with login:', friendlyError);
+      }
 
-      console.log('[Auth] Fetching user data...');
-      await Promise.all([
-        fetchUserProfile(),
-        fetchAvailableCompanies()
-      ]);
+      // Fetch the profile, but don't fail if it doesn't exist
+      await fetchUserProfile();
+      console.log('[Auth] Profile loaded:', state.value.profile);
 
-      // Check if company selection is needed
-      if (!state.value.profile?.current_company_id) {
-        if (state.value.availableCompanies.length === 1) {
-          // Auto-select if only one company
-          console.log('[Auth] Single company available, auto-selecting...');
-          await setCurrentCompany(state.value.availableCompanies[0].id);
-        } else if (state.value.availableCompanies.length > 1) {
-          // Set flag for company selection if multiple companies
-          console.log('[Auth] Multiple companies available, requiring selection...');
-          state.value.needsCompanySelection = true;
-          return;
-        } else {
-          console.warn('[Auth] No companies available for user');
-        }
+      // Always fetch available companies
+      await fetchAvailableCompanies();
+      console.log('[Auth] Available companies:', state.value.availableCompanies);
+
+      // Handle company selection based on available companies
+      if (state.value.availableCompanies.length === 0) {
+        const msg = 'No companies available for this user. Please contact your administrator.';
+        console.warn('[Auth]', msg);
+        state.value.error = msg;
+        throw new AuthError(msg);
+      } else if (state.value.availableCompanies.length === 1) {
+        // Auto-select if only one company
+        console.log('[Auth] Single company available, auto-selecting...');
+        await setCurrentCompany(state.value.availableCompanies[0].id);
+      } else {
+        // Multiple companies available, show selection modal
+        console.log('[Auth] Multiple companies available, requiring selection...');
+        state.value.needsCompanySelection = true;
+        return;
       }
 
       // Only fetch roles if we have a selected company
       if (state.value.profile?.current_company_id) {
-        await fetchUserRolesAndPermissions();
+        await fetchUserRoles();
       }
 
       console.log('[Auth] Sign in complete');
     } catch (error) {
-      console.error('[Auth] Sign in error:', error);
+      const friendlyError = formatError(error);
+      console.error('[Auth] Sign in error:', friendlyError);
+      state.value.error = friendlyError;
       resetState();
-      throw error;
+      throw new AuthError(friendlyError);
     } finally {
       state.value.loading = false;
     }
@@ -307,35 +435,30 @@ export const useAuthStore = defineStore('auth', () => {
 
   async function ensureProfileExists(userId: string): Promise<void> {
     try {
-      const { data: existingProfile, error: fetchError } = await supabase
+      console.log('[Auth] Fetching profile for user:', userId);
+      
+      const { data: profile, error: fetchError } = await supabase
         .from('profiles')
-        .select('id')
+        .select('*')
         .eq('id', userId)
         .single();
 
-      if (fetchError && fetchError.code !== 'PGRST116') { // PGRST116 is "not found"
+      // PGRST116 is "no rows returned" which is expected if no profile exists
+      if (fetchError && fetchError.code !== 'PGRST116') {
+        console.error('[Auth] Error fetching profile:', fetchError);
         throw fetchError;
       }
 
-      if (!existingProfile) {
-        console.log('[Auth] Creating profile for user:', userId);
-        const { error: createError } = await supabase
-          .from('profiles')
-          .insert({
-            id: userId,
-            full_name: state.value.user?.user_metadata?.full_name || '',
-            created_at: new Date().toISOString(),
-            updated_at: new Date().toISOString()
-          });
-
-        if (createError) {
-          console.error('[Auth] Error creating profile:', createError);
-          throw createError;
-        }
+      if (!profile) {
+        console.warn('[Auth] No profile found for user:', userId);
+        // We don't create profiles during login - that should only happen during signup
+        return;
       }
+
+      console.log('[Auth] Profile fetched successfully');
     } catch (error) {
-      console.error('[Auth] Error ensuring profile exists:', error);
-      throw error;
+      // Only log the error, don't throw it
+      console.error('[Auth] Error fetching profile:', error);
     }
   }
 
@@ -412,6 +535,13 @@ export const useAuthStore = defineStore('auth', () => {
     }
 
     try {
+      // Check cache first
+      if (isCacheValid() && cache.value.profile) {
+        console.log('[Auth] Using cached profile');
+        state.value.profile = cache.value.profile;
+        return;
+      }
+
       console.log('[Auth] Fetching user profile...');
       const { data, error } = await supabase
         .from('profiles')
@@ -419,93 +549,86 @@ export const useAuthStore = defineStore('auth', () => {
         .eq('id', state.value.user.id)
         .single();
 
-      if (error) {
-        console.error('[Auth] Error fetching profile:', error.message);
-        throw new AuthError(`Failed to fetch profile: ${error.message}`);
+      if (error && error.code !== 'PGRST116') {
+        const friendlyError = formatError(error);
+        console.error('[Auth] Error fetching profile:', friendlyError);
+        throw new AuthError(friendlyError);
       }
 
-      state.value.profile = data;
+      state.value.profile = data || null;
+      
+      // Update cache
+      cache.value.profile = data || null;
+      cache.value.lastUpdated = Date.now();
+      
       console.log('[Auth] Profile fetched successfully:', data);
     } catch (error) {
-      console.error('[Auth] Error in fetchUserProfile:', error);
-      throw error;
+      const friendlyError = formatError(error);
+      console.error('[Auth] Error in fetchUserProfile:', friendlyError);
+      state.value.profile = null;
     }
   }
 
-  async function fetchUserRolesAndPermissions(): Promise<void> {
-    if (!state.value.user?.id) {
-      console.warn('[Auth] Missing user ID for fetching roles');
-      return;
-    }
-
+  async function fetchUserRoles() {
     try {
-      console.log('[Auth] Fetching user roles and permissions...');
-      
-      const { data: userRoles, error } = await supabase
-        .from('user_roles')
-        .select(`
-          user_id,
-          role_id,
-          company_id,
-          role:roles (
-            id,
-            name,
-            description,
-            is_system_role,
-            role_permissions (
-              permission_key
-            )
-          )
-        `)
-        .or(`company_id.eq.${state.value.profile?.current_company_id},company_id.is.null`)
-        .eq('user_id', state.value.user.id);
-
-      if (error) {
-        console.error('[Auth] Error fetching roles:', error.message);
-        throw new AuthError(`Failed to fetch roles: ${error.message}`);
-      }
-
-      if (!userRoles || !Array.isArray(userRoles)) {
-        console.warn('[Auth] No roles found for user');
-        state.value.roles = [];
-        state.value.permissions = [];
+      // Check cache first
+      if (isCacheValid() && cache.value.roles.length > 0) {
+        console.log('[Auth] Using cached roles');
+        state.value.roles = cache.value.roles;
+        state.value.permissions = cache.value.permissions;
         return;
       }
 
-      console.log('[Auth] Raw user roles data:', userRoles);
-
-      // Type assertion to unknown first, then to the correct type
-      const typedUserRoles = (userRoles as unknown) as Array<{
-        role: {
-          id: string;
-          name: string;
-          description: string;
-          is_system_role: boolean;
-          role_permissions: { permission_key: string; }[];
-        };
-      }>;
+      console.log('[Auth] Fetching user roles and permissions...');
       
-      const roles = typedUserRoles.map(ur => ({
-        id: ur.role.id,
-        name: ur.role.name,
-        description: ur.role.description,
-        is_system_role: ur.role.is_system_role,
-        role_permissions: ur.role.role_permissions || []
-      }));
+      // Use the new get_user_roles function
+      const { data: roles, error: rolesError } = await supabase
+        .rpc('get_user_roles', { user_id: state.value.user?.id });
 
-      const permissions = roles.flatMap(role => 
-        role.role_permissions.map(rp => rp.permission_key)
-      );
+      if (rolesError) throw rolesError;
 
-      state.value.roles = roles;
-      state.value.permissions = [...new Set(permissions)];
-      console.log('[Auth] Roles and permissions fetched successfully:', {
-        roles: roles.map(r => r.name),
-        permissions
+      // Process roles and permissions
+      const processedRoles: Role[] = [];
+      const permissions = new Set<string>();
+
+      if (roles) {
+        (roles as UserRoleResponse[]).forEach(role => {
+          // Extract permissions from the role
+          const rolePermissions = role.permissions?.map(p => ({
+            permission_key: p.permission_key
+          })) || [];
+
+          // Add permissions to the set
+          rolePermissions.forEach(p => permissions.add(p.permission_key));
+
+          // Create the processed role
+          processedRoles.push({
+            id: role.role_id,
+            name: role.role_name,
+            description: '', // Default empty description
+            is_system_role: role.is_system_role,
+            role_permissions: rolePermissions
+          });
+        });
+      }
+
+      // Update state and cache
+      state.value.roles = processedRoles;
+      state.value.permissions = Array.from(permissions);
+      
+      cache.value.roles = processedRoles;
+      cache.value.permissions = Array.from(permissions);
+      cache.value.lastUpdated = Date.now();
+
+      console.log('[Auth] Roles loaded:', {
+        rolesCount: state.value.roles.length,
+        permissionsCount: state.value.permissions.length,
+        permissions: Array.from(permissions) // Log the actual permissions
       });
     } catch (error) {
-      console.error('[Auth] Error in fetchUserRolesAndPermissions:', error);
-      throw error;
+      console.error('[Auth] Error fetching roles:', error);
+      state.value.roles = [];
+      state.value.permissions = [];
     }
   }
 
@@ -513,59 +636,51 @@ export const useAuthStore = defineStore('auth', () => {
     try {
       console.log('[Auth] Fetching available companies...');
       
-      // First get the user's company IDs
-      const { data: userCompanies, error: userCompaniesError } = await supabase
-        .from('user_companies')
-        .select('company_id')
-        .eq('user_id', state.value.user?.id);
+      // Check if user has system role
+      const hasSystemRole = state.value.roles.some(role => role.name === 'App_Admin');
+      
+      if (hasSystemRole) {
+        // For system roles, fetch all companies directly
+        const { data: companies, error: companiesError } = await supabase
+          .from('companies')
+          .select('id, name, logo_url')
+          .order('name');
 
-      if (userCompaniesError) {
-        console.error('[Auth] Error fetching user companies:', userCompaniesError.message);
-        throw new AuthError(`Failed to fetch user companies: ${userCompaniesError.message}`);
-      }
-
-      if (!userCompanies || userCompanies.length === 0) {
-        console.warn('[Auth] No companies found for user');
-        state.value.availableCompanies = [];
+        if (companiesError) throw companiesError;
+        
+        state.value.availableCompanies = companies || [];
+        console.log('[Auth] All companies fetched for system role:', companies);
         return;
       }
-
-      const userCompanyIds = (userCompanies as UserCompany[]).map(uc => uc.company_id);
-
-      // Then fetch the company details
+      
+      // For non-system roles, use the function to get associated companies
       const { data: companies, error: companiesError } = await supabase
-        .from('companies')
-        .select('id, name, logo_url')
-        .in('id', userCompanyIds);
+        .rpc('get_user_companies');
 
       if (companiesError) {
         console.error('[Auth] Error fetching companies:', companiesError.message);
         throw new AuthError(`Failed to fetch companies: ${companiesError.message}`);
       }
 
-      if (!companies) {
-        state.value.availableCompanies = [];
-        return;
-      }
-
-      // Transform the data to match Company interface
-      state.value.availableCompanies = companies.map(company => ({
-        id: company.id,
-        name: company.name,
-        logo_url: company.logo_url || undefined
-      }));
-
+      state.value.availableCompanies = companies || [];
       console.log('[Auth] Companies fetched successfully:', state.value.availableCompanies);
     } catch (error) {
       console.error('[Auth] Error in fetchAvailableCompanies:', error);
       state.value.availableCompanies = [];
-      throw error;
     }
   }
 
   async function setCurrentCompany(companyId: string): Promise<void> {
     if (!state.value.user?.id) {
       throw new AuthError('No user logged in');
+    }
+
+    // Check if user has system role - if so, don't set a company
+    const hasSystemRole = state.value.roles.some(role => role.name === 'App_Admin');
+    if (hasSystemRole) {
+      console.log('[Auth] System role detected, skipping company assignment');
+      state.value.needsCompanySelection = false;
+      return;
     }
 
     try {
@@ -588,7 +703,7 @@ export const useAuthStore = defineStore('auth', () => {
       state.value.needsCompanySelection = false;
 
       // Refresh roles and permissions for new company
-      await fetchUserRolesAndPermissions();
+      await fetchUserRoles();
       console.log('[Auth] Current company updated successfully');
     } catch (error) {
       console.error('[Auth] Error in setCurrentCompany:', error);
@@ -605,7 +720,7 @@ export const useAuthStore = defineStore('auth', () => {
       state.value.needsCompanySelection = false;
 
       // Fetch roles and permissions for the selected company
-      await fetchUserRolesAndPermissions();
+      await fetchUserRoles();
 
       console.log('[Auth] Company selection complete');
     } catch (error) {
@@ -616,29 +731,70 @@ export const useAuthStore = defineStore('auth', () => {
     }
   }
 
-  function resetState(): void {
-    console.log('[Auth] Resetting state...');
-    state.value = {
-      user: null,
-      session: null,
+  // Computed properties
+  const isAuthenticated = computed(() => {
+    const authenticated = !!state.value.session && !!state.value.user && !state.value.loading;
+    console.log('[Auth] Checking authentication status:', {
+      session: !!state.value.session,
+      user: !!state.value.user,
+      loading: state.value.loading,
+      authenticated
+    });
+    return authenticated;
+  });
+
+  const hasSystemRole = computed(() => {
+    return state.value.roles.some(role => role.is_system_role);
+  });
+
+  const hasPermission = (permission: string): boolean => {
+    return state.value.permissions.includes(permission);
+  };
+
+  const isAppAdmin = computed(() => {
+    return state.value.roles.some(role => role.name === 'App_Admin');
+  });
+
+  const currentCompany = computed(() => {
+    console.log('[Auth] Getting current company:', state.value.profile?.current_company_id);
+    return state.value.profile?.current_company_id;
+  });
+
+  const userRole = computed(() => {
+    // Log all roles for debugging
+    console.log('[Auth] All roles:', state.value.roles);
+
+    // Find system role first (like App_Admin)
+    const systemRole = state.value.roles.find(r => r.is_system_role);
+    if (systemRole) {
+      console.log('[Auth] Found system role:', systemRole.name);
+      return systemRole.name;
+    }
+
+    // Fall back to first company role or 'User'
+    const companyRole = state.value.roles[0];
+    const roleName = companyRole?.name || 'User';
+    console.log('[Auth] Using company role or default:', roleName);
+    return roleName;
+  });
+
+  const currentCompanyId = computed(() => {
+    return state.value.profile?.current_company_id;
+  });
+
+  // Add cache clearing function
+  function clearCache(): void {
+    cache.value = {
+      profile: null,
       roles: [],
       permissions: [],
-      loading: false,
-      profile: null,
-      error: null,
-      availableCompanies: [],
-      needsCompanySelection: false,
-      success: null
+      lastUpdated: 0
     };
-    console.log('[Auth] State reset complete');
   }
 
-  function clearError(): void {
-    state.value.error = null;
-  }
-
+  // Return object
   return {
-    // Expose state properties
+    // State
     user: computed(() => state.value.user),
     session: computed(() => state.value.session),
     roles: computed(() => state.value.roles),
@@ -648,15 +804,21 @@ export const useAuthStore = defineStore('auth', () => {
     error: computed(() => state.value.error),
     availableCompanies: computed(() => state.value.availableCompanies),
     currentCompanyId,
-    
+    needsCompanySelection: computed(() => state.value.needsCompanySelection),
+    success: computed(() => state.value.success),
+
     // Getters
     isAuthenticated,
+    hasSystemRole,
     hasPermission,
+    isAppAdmin,
     currentCompany,
     userRole,
-    needsCompanySelection: computed(() => state.value.needsCompanySelection),
-    
+
     // Actions
+    setSession,
+    resetState,
+    registerAuthListener,
     initialize,
     signIn,
     signOut,
@@ -664,26 +826,8 @@ export const useAuthStore = defineStore('auth', () => {
     setCurrentCompany,
     fetchAvailableCompanies,
     selectCompany,
-    
+
     // Expose supabase client for direct access
-    supabase,
-    
-    // Session management
-    setSession: async (session: Session) => {
-      state.value.session = session;
-      state.value.user = session.user as User;
-      
-      try {
-        await Promise.all([
-          fetchUserProfile(),
-          fetchAvailableCompanies(),
-          fetchUserRolesAndPermissions()
-        ]);
-      } catch (error) {
-        console.error('[Auth] Error fetching user data:', error);
-        resetState();
-      }
-    },
-    success: computed(() => state.value.success)
+    supabase
   };
 });

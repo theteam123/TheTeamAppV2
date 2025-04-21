@@ -112,6 +112,20 @@
               </div>
             </div>
           </div>
+
+          <!-- Content Tags -->
+          <div class="mt-4 flex items-center gap-2">
+            <TagIcon class="w-4 h-4 text-gray-500" />
+            <div class="flex flex-wrap gap-1">
+              <span
+                v-for="tag in item.contentTags"
+                :key="tag.id"
+                class="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-medium bg-gray-100 text-gray-800"
+              >
+                {{ tag.name }}
+              </span>
+            </div>
+          </div>
         </div>
       </div>
     </div>
@@ -165,7 +179,8 @@ import {
   FileTypeIcon,
   ExternalLinkIcon,
   PlusSquareIcon,
-  XIcon
+  XIcon,
+  TagIcon
 } from 'lucide-vue-next';
 
 const authStore = useAuthStore();
@@ -195,6 +210,12 @@ const fetchContent = async () => {
             name,
             color
           )
+        ),
+        content_content_tags!content_id (
+          contentTag:content_tags(
+            id,
+            name
+          )
         )
       `)
       .eq('company_id', authStore.currentCompanyId)
@@ -205,7 +226,8 @@ const fetchContent = async () => {
     content.value = data.map(item => ({
       ...item,
       updated_by_name: item.profiles?.full_name || 'Unknown',
-      tags: item.content_tags.map(ct => ct.tag)
+      tags: item.content_tags.map(ct => ct.tag),
+      contentTags: item.content_content_tags.map(ct => ct.contentTag)
     }));
   } catch (err) {
     error.value = err.message;
@@ -304,7 +326,7 @@ const handleSubmit = async (formData) => {
       url: formData.url,
       description: formData.description,
       content_type: formData.contentType,
-      tags: formData.tags,
+      tags: formData.contentTags,
       role_permissions: formData.rolePermissions,
       company_id: authStore.currentCompanyId,
       updated_by: authStore.user?.id

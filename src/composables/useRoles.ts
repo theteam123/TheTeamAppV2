@@ -1,7 +1,27 @@
 import { ref } from 'vue';
-import { useAuthStore } from '../stores/auth';
 import { supabase } from '../lib/supabase';
-import type { Role, RoleFormData } from '../lib/types';
+import { useAuthStore } from '../stores/auth';
+
+interface Role {
+  id: string;
+  name: string;
+  description: string;
+  is_system_role: boolean;
+  is_protected: boolean;
+  permissions: string[];
+}
+
+interface RoleFormData {
+  name: string;
+  description: string;
+  company_id: string;
+  permissions: string[];
+}
+
+interface RolePermission {
+  role_id: string;
+  permission_key: string;
+}
 
 export function useRoles() {
   const authStore = useAuthStore();
@@ -9,68 +29,60 @@ export function useRoles() {
   const loading = ref(false);
   const error = ref<string | null>(null);
 
-  const fetchRoles = async () => {
-    if (!authStore.currentCompanyId) {
-      error.value = 'No company selected';
-      return;
-    }
-
+  async function fetchRoles() {
     loading.value = true;
+    error.value = null;
     try {
-      const { data, error: rolesError } = await supabase
+      const { data: rolesData, error: rolesError } = await supabase
         .from('roles')
         .select(`
           *,
           role_permissions (
             permission_key
-          ),
-          user_roles (
-            count
           )
         `)
         .eq('company_id', authStore.currentCompanyId);
 
       if (rolesError) throw rolesError;
 
-      roles.value = data.map(role => ({
-        ...role,
-        permissions: role.role_permissions.map(rp => rp.permission_key),
-        user_count: role.user_roles[0]?.count || 0
+      roles.value = rolesData.map(role => ({
+        id: role.id,
+        name: role.name,
+        description: role.description,
+        is_system_role: role.is_system_role,
+        is_protected: role.is_protected,
+        permissions: role.role_permissions.map((rp: RolePermission) => rp.permission_key)
       }));
-    } catch (err: any) {
-      console.error('Error fetching roles:', err);
-      error.value = err.message;
+    } catch (err) {
+      console.error('[Roles] Error fetching roles:', err);
+      error.value = err instanceof Error ? err.message : 'An unknown error occurred';
       roles.value = [];
     } finally {
       loading.value = false;
     }
-  };
+  }
 
-  const createRole = async (formData: RoleFormData) => {
-    if (!authStore.hasPermission('roles.create')) {
-      throw new Error('You do not have permission to create roles');
-    }
-
+  async function createRole(formData: RoleFormData) {
     loading.value = true;
+    error.value = null;
     try {
-      const roleData = {
-        name: formData.name,
-        description: formData.description,
-        is_system_role: false,
-        company_id: authStore.currentCompanyId
-      };
-
-      const { data: newRole, error: insertError } = await supabase
+      const { data: role, error: roleError } = await supabase
         .from('roles')
-        .insert(roleData)
+        .insert({
+          name: formData.name,
+          description: formData.description,
+          company_id: formData.company_id,
+          is_system_role: false,
+          is_protected: false
+        })
         .select()
         .single();
 
-      if (insertError) throw insertError;
+      if (roleError) throw roleError;
 
       if (formData.permissions.length > 0) {
         const permissionData = formData.permissions.map(permission_key => ({
-          role_id: newRole.id,
+          role_id: role.id,
           permission_key
         }));
 
@@ -82,71 +94,76 @@ export function useRoles() {
       }
 
       await fetchRoles();
-      return newRole;
-    } catch (err: any) {
-      console.error('Error creating role:', err);
-      error.value = err.message;
+      return role;
+    } catch (err) {
+      console.error('[Roles] Error creating role:', err);
+      error.value = err instanceof Error ? err.message : 'An unknown error occurred';
       throw err;
     } finally {
       loading.value = false;
     }
-  };
+  }
 
-  const updateRole = async (id: string, formData: RoleFormData) => {
-    if (!authStore.hasPermission('roles.edit')) {
-      throw new Error('You do not have permission to edit roles');
-    }
-
+  async function updateRole(roleId: string, formData: RoleFormData) {
     loading.value = true;
+    error.value = null;
     try {
-      const roleData = {
-        name: formData.name,
-        description: formData.description
-      };
+      // Check if role is protected
+      const role = roles.value.find(r => r.id === roleId);
+      if (role?.is_protected) {
+        throw new Error('Cannot modify protected roles');
+      }
 
-      const { error: updateError } = await supabase
+      const { error: roleError } = await supabase
         .from('roles')
-        .update(roleData)
-        .eq('id', id);
+        .update({
+          name: formData.name,
+          description: formData.description
+        })
+        .eq('id', roleId);
 
-      if (updateError) throw updateError;
+      if (roleError) throw roleError;
 
-      // Delete existing permissions
-      const { error: deleteError } = await supabase
-        .from('role_permissions')
-        .delete()
-        .eq('role_id', id);
-
-      if (deleteError) throw deleteError;
-
-      // Insert new permissions
       if (formData.permissions.length > 0) {
+        const { error: deleteError } = await supabase
+          .from('role_permissions')
+          .delete()
+          .eq('role_id', roleId);
+
+        if (deleteError) throw deleteError;
+
         const permissionData = formData.permissions.map(permission_key => ({
-          role_id: id,
+          role_id: roleId,
           permission_key
         }));
 
-        const { error: permissionError } = await supabase
+        const { error: insertError } = await supabase
           .from('role_permissions')
           .insert(permissionData);
 
-        if (permissionError) throw permissionError;
+        if (insertError) throw insertError;
       }
 
       await fetchRoles();
       return true;
-    } catch (err: any) {
-      console.error('Error updating role:', err);
-      error.value = err.message;
+    } catch (err) {
+      console.error('[Roles] Error updating role:', err);
+      error.value = err instanceof Error ? err.message : 'An unknown error occurred';
       throw err;
     } finally {
       loading.value = false;
     }
-  };
+  }
 
   const deleteRole = async (id: string) => {
     if (!authStore.hasPermission('roles.delete')) {
       throw new Error('You do not have permission to delete roles');
+    }
+
+    // Check if role is protected
+    const role = roles.value.find(r => r.id === id);
+    if (role?.is_protected) {
+      throw new Error('Cannot delete protected roles');
     }
 
     loading.value = true;

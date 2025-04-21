@@ -3,12 +3,36 @@ import { useAuthStore } from '../stores/auth';
 
 const routes: RouteRecordRaw[] = [
   {
+    path: '/',
+    name: 'home',
+    component: () => import('../pages/Home.vue'),
+    meta: {
+      requiresAuth: true
+    }
+  },
+  {
+    path: '/login',
+    name: 'login',
+    component: () => import('../pages/Login.vue'),
+    meta: {
+      requiresAuth: false
+    }
+  },
+  {
     path: '/company-select',
     name: 'company-select',
     component: () => import('../pages/CompanySelect.vue'),
     meta: {
       requiresAuth: true,
       layout: 'blank'
+    }
+  },
+  {
+    path: '/dashboard',
+    name: 'dashboard',
+    component: () => import('../pages/Dashboard.vue'),
+    meta: {
+      requiresAuth: true
     }
   }
 ];
@@ -35,6 +59,11 @@ router.beforeEach(async (
   // Check if company selection is needed
   if (isAuthenticated && auth.needsCompanySelection && to.name !== 'company-select') {
     return next({ name: 'company-select' });
+  }
+
+  // If authenticated and company is selected, redirect to dashboard
+  if (isAuthenticated && !auth.needsCompanySelection && to.name === 'company-select') {
+    return next({ name: 'dashboard' });
   }
 
   next();

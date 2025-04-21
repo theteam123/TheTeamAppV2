@@ -2,15 +2,15 @@
   <div class="p-8">
     <div class="flex justify-between items-center mb-6">
       <div>
-        <h1 class="text-2xl font-bold text-gray-900">Tags</h1>
-        <p class="text-sm text-gray-500 mt-1">Manage and organize content tags</p>
+        <h1 class="text-2xl font-bold text-gray-900">Content Tags</h1>
+        <p class="text-sm text-gray-500 mt-1">Manage and organize content tags for better content organization</p>
       </div>
       <button
         @click="openCreateTagModal"
         class="bg-green-600 text-white px-4 py-2 rounded-lg hover:bg-green-700 flex items-center gap-2"
       >
         <TagPlusIcon class="w-5 h-5" />
-        Create Tag
+        Create Content Tag
       </button>
     </div>
 
@@ -24,10 +24,10 @@
       {{ error }}
     </div>
 
-    <!-- Tags Grid -->
-    <div v-else-if="tags.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
+    <!-- Content Tags Grid -->
+    <div v-else-if="contentTags.length > 0" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
       <div
-        v-for="tag in tags"
+        v-for="tag in contentTags"
         :key="tag.id"
         class="bg-white rounded-lg shadow-md overflow-hidden"
       >
@@ -61,14 +61,10 @@
             </div>
           </div>
 
-          <div class="mt-4">
-            <div class="flex items-center gap-2 text-sm text-gray-600">
-              <HashIcon class="w-4 h-4" />
-              <span>{{ tag.usage_count }} items tagged</span>
-            </div>
-            <div class="flex items-center gap-2 text-sm text-gray-600 mt-1">
-              <FolderIcon class="w-4 h-4" />
-              <span>{{ tag.categories.join(', ') || 'All categories' }}</span>
+          <div class="mt-4 text-sm text-gray-500">
+            <div class="flex items-center gap-2">
+              <FileIcon class="w-4 h-4" />
+              <span>{{ tag.content_count || 0 }} associated content items</span>
             </div>
           </div>
         </div>
@@ -78,15 +74,15 @@
     <!-- Empty State -->
     <div v-else class="text-center py-12">
       <TagIcon class="mx-auto h-12 w-12 text-gray-400" />
-      <h3 class="mt-2 text-sm font-medium text-gray-900">No tags</h3>
-      <p class="mt-1 text-sm text-gray-500">Get started by creating a new tag.</p>
+      <h3 class="mt-2 text-sm font-medium text-gray-900">No content tags</h3>
+      <p class="mt-1 text-sm text-gray-500">Get started by creating a new content tag.</p>
       <div class="mt-6">
         <button
           @click="openCreateTagModal"
           class="inline-flex items-center px-4 py-2 border border-transparent shadow-sm text-sm font-medium rounded-md text-white bg-green-600 hover:bg-green-700 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-green-500"
         >
           <TagPlusIcon class="w-5 h-5 mr-2" />
-          Create Tag
+          Create Content Tag
         </button>
       </div>
     </div>
@@ -94,7 +90,7 @@
     <!-- Create/Edit Tag Modal -->
     <div v-if="showModal" class="fixed inset-0 bg-gray-500 bg-opacity-75 flex items-center justify-center">
       <div class="bg-white rounded-lg p-6 max-w-md w-full">
-        <h2 class="text-xl font-bold mb-4">{{ isEditing ? 'Edit Tag' : 'Create New Tag' }}</h2>
+        <h2 class="text-xl font-bold mb-4">{{ isEditing ? 'Edit Content Tag' : 'Create New Content Tag' }}</h2>
         <form @submit.prevent="handleSubmit" class="space-y-4">
           <div>
             <label for="tag-name" class="block text-sm font-medium text-gray-700">Tag Name</label>
@@ -137,26 +133,6 @@
             </div>
           </div>
 
-          <div>
-            <label class="block text-sm font-medium text-gray-700">Categories</label>
-            <div class="mt-2 space-y-2">
-              <label
-                v-for="category in availableCategories"
-                :key="category"
-                :class="'inline-flex items-center mr-4'"
-              >
-                <input
-                  type="checkbox"
-                  :id="'category-' + category"
-                  :value="category"
-                  v-model="formData.categories"
-                  class="rounded border-gray-300 text-green-600 focus:ring-green-500"
-                />
-                <span class="ml-2 text-sm text-gray-700">{{ category }}</span>
-              </label>
-            </div>
-          </div>
-
           <div class="flex justify-end gap-3 mt-6">
             <button
               type="button"
@@ -189,55 +165,45 @@ import {
   PencilIcon,
   TrashIcon,
   LoaderIcon,
-  XIcon,
-  HashIcon,
-  FolderIcon,
+  FileIcon
 } from 'lucide-vue-next';
 
 const authStore = useAuthStore();
 const loading = ref(false);
 const error = ref(null);
-const tags = ref([]);
+const contentTags = ref([]);
 const showModal = ref(false);
 const isEditing = ref(false);
-
-const availableCategories = [
-  'Records',
-  'Users',
-  'Companies'
-];
 
 const formData = ref({
   id: '',
   name: '',
   description: '',
-  color: '#4F46E5',
-  categories: [] as string[]
+  color: '#4F46E5'
 });
 
-const fetchTags = async () => {
+const fetchContentTags = async () => {
   if (!authStore.currentCompanyId) return;
   
   loading.value = true;
   try {
     const { data, error: fetchError } = await supabase
-      .from('tags')
+      .from('content_tags')
       .select(`
         *,
-        tagged_items (
-          count
-        )
+        content_count:content_content_tags_aggregate(count)
       `)
       .eq('company_id', authStore.currentCompanyId);
 
     if (fetchError) throw fetchError;
 
-    tags.value = data.map(tag => ({
+    contentTags.value = data.map(tag => ({
       ...tag,
-      usage_count: tag.tagged_items[0]?.count || 0
+      content_count: tag.content_count.count
     }));
   } catch (err) {
-    error.value = err.message;
+    console.error('Error fetching content tags:', err);
+    error.value = err instanceof Error ? err.message : 'Failed to fetch content tags';
   } finally {
     loading.value = false;
   }
@@ -249,8 +215,7 @@ const openCreateTagModal = () => {
     id: '',
     name: '',
     description: '',
-    color: '#4F46E5',
-    categories: []
+    color: '#4F46E5'
   };
   showModal.value = true;
 };
@@ -261,8 +226,7 @@ const editTag = (tag) => {
     id: tag.id,
     name: tag.name,
     description: tag.description || '',
-    color: tag.color,
-    categories: tag.categories || []
+    color: tag.color
   };
   showModal.value = true;
 };
@@ -274,52 +238,51 @@ const handleSubmit = async () => {
       name: formData.value.name,
       description: formData.value.description,
       color: formData.value.color,
-      categories: formData.value.categories,
       company_id: authStore.currentCompanyId
     };
 
     if (isEditing.value) {
       const { error: updateError } = await supabase
-        .from('tags')
+        .from('content_tags')
         .update(tagData)
         .eq('id', formData.value.id);
 
       if (updateError) throw updateError;
     } else {
       const { error: insertError } = await supabase
-        .from('tags')
+        .from('content_tags')
         .insert(tagData);
 
       if (insertError) throw insertError;
     }
 
     showModal.value = false;
-    await fetchTags();
+    await fetchContentTags();
   } catch (err) {
-    error.value = err.message;
+    error.value = err instanceof Error ? err.message : 'Failed to save content tag';
   } finally {
     loading.value = false;
   }
 };
 
 const deleteTag = async (tag) => {
-  if (!confirm('Are you sure you want to delete this tag? This action cannot be undone.')) return;
+  if (!confirm('Are you sure you want to delete this content tag? This will remove it from all associated content.')) return;
 
   loading.value = true;
   try {
     const { error: err } = await supabase
-      .from('tags')
+      .from('content_tags')
       .delete()
       .eq('id', tag.id);
 
     if (err) throw err;
-    await fetchTags();
+    await fetchContentTags();
   } catch (err) {
-    error.value = err.message;
+    error.value = err instanceof Error ? err.message : 'Failed to delete content tag';
   } finally {
     loading.value = false;
   }
 };
 
-onMounted(fetchTags);
+onMounted(fetchContentTags);
 </script>
