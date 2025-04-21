@@ -55,7 +55,7 @@
             </div>
             <div class="flex items-center gap-2 text-sm text-gray-600 mt-1">
               <TagIcon class="w-4 h-4" />
-              <span>{{ section.tags.length }} associated tags</span>
+              <span>{{ section.contentTags.length }} associated content tags</span>
             </div>
             <div v-if="section.parent_id" class="flex items-center gap-2 text-sm text-gray-600 mt-1">
               <FolderTreeIcon class="w-4 h-4" />
@@ -160,10 +160,10 @@
           </div>
 
           <div>
-            <label class="block text-sm font-medium text-gray-700">Associated Tags</label>
+            <label class="block text-sm font-medium text-gray-700">Associated Content Tags</label>
             <div class="mt-2 space-y-2">
               <label
-                v-for="tag in availableTags"
+                v-for="tag in availableContentTags"
                 :key="tag.id"
                 :class="'inline-flex items-center mr-4'"
               >
@@ -171,7 +171,7 @@
                   type="checkbox"
                   :id="'tag-' + tag.id"
                   :value="tag.id"
-                  v-model="formData.tag_ids"
+                  v-model="formData.content_tag_ids"
                   class="rounded border-gray-300 text-green-600 focus:ring-green-500"
                 />
                 <span class="ml-2 text-sm text-gray-700">{{ tag.name }}</span>
@@ -220,7 +220,7 @@ const authStore = useAuthStore();
 const loading = ref(false);
 const error = ref(null);
 const menuSections = ref([]);
-const availableTags = ref([]);
+const availableContentTags = ref([]);
 const showModal = ref(false);
 const isEditing = ref(false);
 
@@ -230,7 +230,7 @@ const formData = ref({
   description: '',
   color: '#4F46E5',
   parent_id: '',
-  tag_ids: [] as string[]
+  content_tag_ids: [] as string[]
 });
 
 const availableParentSections = computed(() => {
@@ -248,8 +248,8 @@ const fetchMenuSections = async () => {
       .select(`
         *,
         subsections:menu_sections!parent_id(id, name),
-        tags:menu_section_tags(
-          tag:tags(
+        contentTags:menu_section_content_tags(
+          contentTag:content_tags(
             id,
             name
           )
@@ -262,7 +262,7 @@ const fetchMenuSections = async () => {
     menuSections.value = data.map(section => ({
       ...section,
       item_count: 0,
-      tags: section.tags.map(ct => ct.tag),
+      contentTags: section.contentTags.map(ct => ct.contentTag),
       subsections: section.subsections || []
     }));
   } catch (err) {
@@ -272,17 +272,18 @@ const fetchMenuSections = async () => {
   }
 };
 
-const fetchTags = async () => {
+const fetchContentTags = async () => {
   try {
-    const { data, error: fetchError } = await supabase
-      .from('tags')
-      .select('id, name')
-      .eq('company_id', authStore.currentCompanyId);
+    const { data, error: err } = await supabase
+      .from('content_tags')
+      .select('*')
+      .order('name');
 
-    if (fetchError) throw fetchError;
-    availableTags.value = data;
+    if (err) throw err;
+    availableContentTags.value = data;
   } catch (err) {
-    console.error('Error fetching tags:', err);
+    console.error('Error fetching content tags:', err);
+    error.value = 'Failed to load content tags';
   }
 };
 
@@ -298,7 +299,7 @@ const openCreateSectionModal = () => {
     description: '',
     color: '#4F46E5',
     parent_id: '',
-    tag_ids: []
+    content_tag_ids: []
   };
   showModal.value = true;
 };
@@ -311,7 +312,7 @@ const editSection = (section) => {
     description: section.description || '',
     color: section.color,
     parent_id: section.parent_id || '',
-    tag_ids: section.tags.map(t => t.id)
+    content_tag_ids: section.contentTags.map(t => t.id)
   };
   showModal.value = true;
 };
@@ -340,7 +341,7 @@ const handleSubmit = async () => {
 
       // Delete existing tag associations
       const { error: deleteError } = await supabase
-        .from('menu_section_tags')
+        .from('menu_section_content_tags')
         .delete()
         .eq('menu_section_id', sectionId);
 
@@ -357,14 +358,14 @@ const handleSubmit = async () => {
     }
 
     // Create new tag associations
-    if (formData.value.tag_ids.length > 0) {
-      const tagAssociations = formData.value.tag_ids.map(tagId => ({
+    if (formData.value.content_tag_ids.length > 0) {
+      const tagAssociations = formData.value.content_tag_ids.map(tagId => ({
         menu_section_id: sectionId,
-        tag_id: tagId
+        content_tag_id: tagId
       }));
 
       const { error: tagError } = await supabase
-        .from('menu_section_tags')
+        .from('menu_section_content_tags')
         .insert(tagAssociations);
 
       if (tagError) throw tagError;
@@ -399,6 +400,6 @@ const deleteSection = async (section) => {
 };
 
 onMounted(async () => {
-  await Promise.all([fetchMenuSections(), fetchTags()]);
+  await Promise.all([fetchMenuSections(), fetchContentTags()]);
 });
 </script>

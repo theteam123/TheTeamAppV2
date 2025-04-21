@@ -26,6 +26,17 @@
         </div>
 
         <div>
+          <label for="company-logo" class="block text-sm font-medium text-gray-700">Logo URL</label>
+          <input
+            id="company-logo"
+            type="url"
+            v-model="formData.logo_url"
+            class="mt-1 block w-full rounded-md border-gray-300 shadow-sm focus:border-green-500 focus:ring-green-500"
+            placeholder="https://example.com/logo.png"
+          />
+        </div>
+
+        <div>
           <label for="company-settings" class="block text-sm font-medium text-gray-700">Settings</label>
           <textarea
             id="company-settings"
@@ -73,7 +84,7 @@ const props = defineProps<{
 
 const emit = defineEmits<{
   (e: 'close'): void;
-  (e: 'submit', data: { name: string; website: string; settingsStr: string }): void;
+  (e: 'submit', data: { name: string; website: string; logo_url: string; settingsStr: string }): void;
 }>();
 
 const loading = ref(false);
@@ -81,6 +92,7 @@ const loading = ref(false);
 const formData = ref({
   name: props.companyData?.name || '',
   website: props.companyData?.website || '',
+  logo_url: props.companyData?.logo_url || '',
   settingsStr: props.companyData ? JSON.stringify(props.companyData.settings, null, 2) : '{}'
 });
 

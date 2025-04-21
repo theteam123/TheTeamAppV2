@@ -28,22 +28,12 @@
             ]"
           >
             <div class="flex items-center flex-1">
-              <div v-if="company.logo_url" class="flex-shrink-0 h-12 w-12">
-                <img
-                  :src="company.logo_url"
-                  :alt="company.name"
-                  class="h-12 w-12 rounded-full"
-                />
-              </div>
-              <div v-else class="flex-shrink-0 h-12 w-12 bg-gray-200 rounded-full flex items-center justify-center">
+              <div class="flex-shrink-0 h-12 w-12 bg-gray-200 rounded-full flex items-center justify-center">
                 <BuildingIcon class="h-8 w-8 text-gray-500" />
               </div>
               <div class="ml-4">
                 <div class="text-sm font-medium text-gray-900">
                   {{ company.name }}
-                </div>
-                <div v-if="company.website" class="text-sm text-gray-500">
-                  {{ company.website }}
                 </div>
               </div>
             </div>

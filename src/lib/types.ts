@@ -18,13 +18,17 @@ export interface Profile {
   avatar_url?: string;
   current_company_id?: string;
   email?: string;
+  company_ids?: string[];
 }
 
 export interface Role {
   id: string;
   name: string;
   description: string;
-  role_permissions: RolePermission[];
+  is_system_role?: boolean;
+  role_permissions: {
+    permission_key: string;
+  }[];
 }
 
 export interface RolePermission {
@@ -32,14 +36,20 @@ export interface RolePermission {
 }
 
 export interface UserRole {
+  user_id: string;
   role_id: string;
   company_id: string;
-  roles: Role;
+  roles?: {
+    name: string;
+    description?: string;
+  };
 }
 
 // Extend the Supabase User type to include our custom profile
 export interface User extends SupabaseUser {
   profile?: Profile;
+  role?: string;
+  status?: 'active' | 'inactive' | 'pending' | 'invited';
 }
 
 export interface RoleFormData {
@@ -47,4 +57,20 @@ export interface RoleFormData {
   name: string;
   description: string;
   permissions: string[];
+}
+
+export interface Company {
+  id: string;
+  name: string;
+  website?: string;
+  settings?: any;
+  created_at: string;
+  updated_at: string;
+  archived_at?: string | null;
+}
+
+export interface AuditDetails {
+  previous_status?: string;
+  new_status?: string;
+  [key: string]: any;
 }

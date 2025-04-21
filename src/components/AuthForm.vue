@@ -3,7 +3,7 @@
     <div class="max-w-md w-full space-y-8">
       <div class="text-center">
         <div class="flex justify-center">
-          <TeamLogo :height="96" />
+          <TeamLogo :height="48" />
         </div>
         <h2 class="mt-6 text-3xl font-extrabold text-gray-900">
           Sign in to your account

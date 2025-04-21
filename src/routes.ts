@@ -36,10 +36,13 @@ const routes: RouteRecordRaw[] = [
     meta: { requiresAuth: true }
   },
   {
-    path: '/admin/tags',
-    name: 'tags',
+    path: '/admin/content-tags',
+    name: 'content-tags',
     component: () => import('./pages/admin/Tags.vue'),
-    meta: { requiresAuth: true }
+    meta: {
+      requiresAuth: true,
+      requiresPermission: 'content.manage'
+    }
   },
   {
     path: '/admin/menu-sections',
@@ -59,7 +62,7 @@ const routes: RouteRecordRaw[] = [
     component: () => import('./pages/admin/Companies.vue'),
     meta: {
       requiresAuth: true,
-      requiredPermission: 'manage_companies'
+      requiredPermission: 'companies.view'
     }
   },
   {

@@ -7,7 +7,7 @@
           <aside class="w-64 bg-white border-r border-gray-200 flex flex-col">
             <!-- Logo -->
             <div class="flex items-center justify-start h-16 px-4 border-b border-gray-200">
-              <TeamLogo :height="48" />
+              <TeamLogo :height="36" />
             </div>
             
             <!-- Search Bar -->
@@ -45,6 +45,26 @@
               </div>
             </div>
             
+            <!-- Company Display for non-system roles -->
+            <div v-if="!authStore.hasSystemRole && currentCompany" class="px-4 py-3 border-b border-gray-200">
+              <div class="flex items-center">
+                <div v-if="currentCompany.logo_url" class="flex-shrink-0 h-8 w-8">
+                  <img
+                    :src="currentCompany.logo_url"
+                    :alt="currentCompany.name"
+                    class="h-8 w-8 rounded"
+                  />
+                </div>
+                <div v-else class="flex-shrink-0 h-8 w-8 bg-gray-200 rounded flex items-center justify-center">
+                  <BuildingIcon class="h-5 w-5 text-gray-500" />
+                </div>
+                <div class="ml-3">
+                  <p class="text-sm font-medium text-gray-900">{{ currentCompany.name }}</p>
+                  <p class="text-xs text-gray-500">Your Company</p>
+                </div>
+              </div>
+            </div>
+
             <!-- Navigation -->
             <nav class="flex-1 p-4 space-y-1">
               <router-link 
@@ -59,13 +79,16 @@
 
             <!-- Admin Settings Section -->
             <div class="p-4 border-t border-gray-200">
-              <details class="group">
-                <summary class="flex items-center px-4 py-2 text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-100 rounded-lg">
+              <div class="group">
+                <button 
+                  @click="isAdminMenuOpen = !isAdminMenuOpen"
+                  class="flex items-center px-4 py-2 text-sm font-medium text-gray-700 cursor-pointer hover:bg-gray-100 rounded-lg w-full"
+                >
                   <SettingsIcon class="w-5 h-5 mr-3" />
-                  Admin Settings
-                  <ChevronDownIcon class="w-4 h-4 ml-auto transition-transform group-open:rotate-180" />
-                </summary>
-                <div class="mt-1 space-y-1">
+                  {{ authStore.hasSystemRole ? 'System Admin' : 'Admin Settings' }}
+                  <ChevronDownIcon class="w-4 h-4 ml-auto transition-transform" :class="{ 'rotate-180': isAdminMenuOpen }" />
+                </button>
+                <div v-if="isAdminMenuOpen" class="mt-1 space-y-1">
                   <router-link 
                     v-for="item in adminItems" 
                     :key="item.path"
@@ -77,7 +100,7 @@
                     {{ item.name }}
                   </router-link>
                 </div>
-              </details>
+              </div>
             </div>
 
             <!-- User Menu -->
@@ -86,20 +109,27 @@
                 <div class="flex items-center">
                   <div class="flex-shrink-0">
                     <img
-                      :src="authStore.user?.profile?.avatar_url || 'https://www.gravatar.com/avatar/?d=mp'"
+                      :src="authStore.profile?.avatar_url || 'https://www.gravatar.com/avatar/?d=mp'"
                       class="h-8 w-8 rounded-full"
                       alt=""
                     />
                   </div>
                   <div class="ml-3">
                     <p class="text-sm font-medium text-gray-900">
-                      {{ authStore.user?.profile?.full_name }}
+                      {{ authStore.profile?.full_name }}
                     </p>
-                    <div class="flex items-center gap-2">
+                    <div class="flex flex-col gap-1">
                       <span class="text-xs font-medium px-2 py-0.5 rounded-full"
                         :class="roleColorClass"
                       >
                         {{ authStore.userRole }}
+                      </span>
+                      <span 
+                        v-if="currentCompany"
+                        class="text-xs text-gray-600 flex items-center gap-1"
+                      >
+                        <BuildingIcon class="w-3 h-3" />
+                        {{ currentCompany.name }}
                       </span>
                       <button
                         @click="handleSignOut"
@@ -122,12 +152,6 @@
                   <h1 class="text-2xl font-semibold text-gray-900">
                     {{ currentPageTitle }}
                   </h1>
-                  <p v-if="currentPageDescription" class="text-sm text-gray-500">
-                    {{ currentPageDescription }}
-                  </p>
-                </div>
-                <div class="w-64">
-                  <CompanySelectionDropdown />
                 </div>
               </div>
             </header>
@@ -156,7 +180,6 @@ import { useRouter, useRoute } from 'vue-router';
 import { useAuthStore } from '@/stores/auth';
 import { useDebounce } from '@/composables/useDebounce';
 import { useContentSearch } from '@/composables/useContentSearch';
-import CompanySelectionDropdown from '@/components/CompanySelectionDropdown.vue';
 import ErrorBoundary from '@/components/ErrorBoundary.vue';
 import LoadingSpinner from '@/components/LoadingSpinner.vue';
 import { TeamLogo } from '@/components';
@@ -175,39 +198,57 @@ import {
   BookIcon,
   BugIcon
 } from 'lucide-vue-next';
+import { usePermissions } from '@/composables/usePermissions';
 
 const router = useRouter();
 const route = useRoute();
 const authStore = useAuthStore();
 const { searchContent } = useContentSearch();
+const { permissionState, checkPermission } = usePermissions();
 
 const searchInput = ref('');
 const debouncedSearchQuery = ref('');
 const showSearchResults = ref(false);
 const searchResults = ref<SearchResult[]>([]);
 const searchLoading = ref(false);
+const isAdminMenuOpen = ref(false);
 
-const adminItems = [
-  { name: 'Users', path: '/admin/users', icon: UsersIcon, description: 'Manage users and their roles within your organization' },
-  { name: 'Companies', path: '/admin/companies', icon: BuildingIcon, description: "Manage your organization's companies and their settings" },
-  { name: 'Roles', path: '/admin/roles', icon: ShieldIcon, description: 'Configure and manage user roles and permissions' },
-  { name: 'Content', path: '/admin/content', icon: FileEditIcon, description: 'Organize and manage all content types' },
-  { name: 'Tags', path: '/admin/tags', icon: TagIcon, description: 'Manage and organize content tags' },
-  { name: 'Menu Sections', path: '/admin/menu-sections', icon: FolderIcon, description: 'Manage menu sections and hierarchies' },
-  { name: 'Debug', path: '/admin/debug', icon: BugIcon, description: 'View debug information and system status' },
-];
+const adminItems = computed(() => {
+  // System roles (App_Admin) see Companies and Debug only
+  if (authStore.hasSystemRole) {
+    return [
+      { name: 'Manage Companies', path: '/admin/companies', icon: BuildingIcon },
+      { name: 'Debug', path: '/admin/debug', icon: BugIcon }
+    ];
+  }
 
-const allMenuItems = [...adminItems];
+  // Regular admin sees company-specific items based on permissions
+  const items = [];
+
+  if (permissionState.value['users.view']) {
+    items.push({ name: 'Manage Users', path: '/admin/users', icon: UsersIcon });
+  }
+  if (permissionState.value['roles.view']) {
+    items.push({ name: 'Roles', path: '/admin/roles', icon: ShieldIcon });
+  }
+  if (permissionState.value['content.view']) {
+    items.push({ name: 'Content', path: '/admin/content', icon: FileEditIcon });
+  }
+
+  return items;
+});
+
+const allMenuItems = [...adminItems.value];
 
 const currentPageTitle = computed(() => {
   if (route.path === '/') return 'Welcome';
-  const currentItem = adminItems.find(item => item.path === route.path);
-  return currentItem?.name || 'TheTeam';
+  const currentItem = adminItems.value.find(item => item.path === route.path);
+  return currentItem?.name || (authStore.hasSystemRole ? 'System Admin' : 'TheTeam');
 });
 
 const currentPageDescription = computed(() => {
   if (route.path === '/') return '';
-  const currentItem = adminItems.find(item => item.path === route.path);
+  const currentItem = adminItems.value.find(item => item.path === route.path);
   return currentItem?.description || '';
 });
 
@@ -222,7 +263,7 @@ const filteredMenuItems = computed(() => {
 const roleColorClass = computed(() => {
   const role = authStore.userRole;
   switch (role) {
-    case 'SuperAdmin':
+    case 'App_Admin':
       return 'bg-purple-100 text-purple-800';
     case 'Manager':
       return 'bg-blue-100 text-blue-800';
@@ -231,6 +272,15 @@ const roleColorClass = computed(() => {
     default:
       return 'bg-gray-100 text-gray-800';
   }
+});
+
+const currentCompany = computed(() => {
+  const currentId = authStore.currentCompanyId;
+  if (!currentId) return null;
+  
+  // Find the company in available companies
+  const company = authStore.availableCompanies.find(c => c.id === currentId);
+  return company || null;
 });
 
 const handleSearchBlur = () => {
@@ -312,6 +362,22 @@ onMounted(() => {
     loading: authStore.loading,
     timestamp: new Date().toISOString()
   });
+
+  // Initialize permissions on mount
+  Promise.all([
+    checkPermission('users.view'),
+    checkPermission('users.create'),
+    checkPermission('users.edit'),
+    checkPermission('users.delete'),
+    checkPermission('roles.view'),
+    checkPermission('roles.create'),
+    checkPermission('roles.edit'),
+    checkPermission('roles.delete'),
+    checkPermission('content.view'),
+    checkPermission('content.create'),
+    checkPermission('content.edit'),
+    checkPermission('content.delete'),
+  ]);
 });
 </script>
 

@@ -225,31 +225,21 @@ const copyToClipboard = (section: 'userInfo' | 'rolesAndPermissions' | 'companyI
 
 const fetchDebugInfo = async () => {
   try {
-    // Fetch user roles with complete role information
-    const { data: userRoles, error: userRolesError } = await supabase
-      .from('user_roles')
-      .select(`
-        user_id,
-        role_id,
-        company_id,
-        role:roles (
-          id,
-          name,
-          description,
-          is_system_role,
-          role_permissions (
-            permission_key
-          )
-        )
-      `)
-      .or(`company_id.eq.${authStore.currentCompanyId},company_id.is.null`)
-      .eq('user_id', authStore.user?.id);
+    // Fetch user roles with complete role information using RPC instead of direct query
+    let userRolesData = [];
+    const { data, error: userRolesError } = await supabase
+      .rpc('get_user_roles', {
+        user_id: authStore.user?.id
+      });
+
+    if (userRolesError) {
+      console.error('Error fetching user roles:', userRolesError);
+    } else {
+      userRolesData = data || [];
+    }
 
     rolesAndPermissions.value = {
-      userRoles: (userRoles || []).map(ur => ({
-        ...ur,
-        roleName: ur.role?.name || 'Unknown Role'
-      })),
+      userRoles: [],
       storeRoles: (authStore.roles || []).map(role => ({
         id: role.id,
         name: role.name,
@@ -258,7 +248,7 @@ const fetchDebugInfo = async () => {
         permissions: (role.role_permissions || []).map(p => p.permission_key)
       })),
       storePermissions: authStore.permissions || [],
-      rawUserRoles: userRoles || []
+      rawUserRoles: userRolesData
     };
 
     // Fetch user info with extended role information
@@ -267,6 +257,10 @@ const fetchDebugInfo = async () => {
       .select('*')
       .eq('id', authStore.user?.id)
       .single();
+
+    if (profileError) {
+      console.error('Error fetching profile:', profileError);
+    }
 
     userInfo.value = {
       user: authStore.user,
@@ -277,56 +271,48 @@ const fetchDebugInfo = async () => {
     };
 
     // Fetch company info
-    const { data: company, error: companyError } = await supabase
-      .from('companies')
-      .select('*')
-      .eq('id', authStore.currentCompanyId)
-      .single();
+    if (authStore.currentCompanyId) {
+      const { data: company, error: companyError } = await supabase
+        .from('companies')
+        .select('*')
+        .eq('id', authStore.currentCompanyId)
+        .single();
 
-    companyInfo.value = {
-      currentCompany: company || null,
-      availableCompanies: authStore.availableCompanies || []
-    };
+      if (companyError) {
+        console.error('Error fetching company:', companyError);
+      }
 
-    // Fetch ALL roles including system roles
-    const { data: allRoles, error: allRolesError } = await supabase
-      .from('roles')
-      .select(`
-        id,
-        name,
-        description,
-        is_system_role,
-        role_permissions (
-          permission_key
-        )
-      `);
+      companyInfo.value = {
+        currentCompany: company || null,
+        availableCompanies: authStore.availableCompanies || []
+      };
+    } else {
+      companyInfo.value = {
+        currentCompany: null,
+        availableCompanies: authStore.availableCompanies || []
+      };
+    }
 
-    // Separate system roles and user roles
-    const systemRoles = (allRoles || []).filter(role => role.is_system_role);
-    const userRolesFromAll = (userRoles || []).map(ur => ur.role);
-
+    // Set role details using store data instead of direct query
     roleDetails.value = {
       currentUserRole: {
         name: authStore.userRole,
         isSystemRole: (authStore.roles || []).some(r => r.is_system_role),
         allRoles: authStore.roles || []
       },
-      systemRoles: systemRoles.map(role => ({
-        name: role.name,
-        description: role.description,
-        permissions: (role.role_permissions || []).map(p => p.permission_key)
-      })),
-      allUserRoles: userRolesFromAll.map(role => ({
-        name: role?.name || 'Unknown Role',
-        description: role?.description || '',
-        is_system_role: role?.is_system_role || false,
-        permissions: (role?.role_permissions || []).map(p => p.permission_key)
-      })),
+      systemRoles: (authStore.roles || [])
+        .filter(role => role.is_system_role)
+        .map(role => ({
+          name: role.name,
+          description: role.description,
+          permissions: (role.role_permissions || []).map(p => p.permission_key)
+        })),
+      allUserRoles: [],
       debug: {
-        rawSystemRoles: systemRoles,
-        rawUserRoles: userRoles || [],
+        rawSystemRoles: [],
+        rawUserRoles: userRolesData || [],
         storeRoles: authStore.roles || [],
-        allRoles: allRoles || []
+        allRoles: []
       }
     };
 

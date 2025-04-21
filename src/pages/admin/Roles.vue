@@ -71,27 +71,38 @@
           <div class="flex justify-between items-start">
             <div>
               <div class="flex items-center gap-2">
-                <h3 class="text-lg font-semibold text-gray-900">{{ role.name }}</h3>
-                <span
-                  v-if="role.is_system_role"
-                  class="px-2 py-0.5 text-xs font-medium rounded-full bg-purple-100 text-purple-800"
-                >
-                  System
-                </span>
+                <h3 class="text-lg font-semibold text-gray-900">
+                  {{ role.name }}
+                  <span
+                    v-if="role.is_system_role"
+                    class="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-purple-100 text-purple-800"
+                  >
+                    System Role
+                  </span>
+                  <span
+                    v-if="role.is_protected"
+                    class="ml-2 inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-yellow-100 text-yellow-800"
+                  >
+                    Protected
+                  </span>
+                </h3>
+                <p class="text-sm text-gray-500 mt-1">{{ role.description }}</p>
               </div>
-              <p class="text-sm text-gray-500 mt-1">{{ role.description }}</p>
             </div>
             <div class="flex gap-2">
               <button
+                v-if="!role.is_protected"
                 @click="editRole(role)"
                 class="text-gray-400 hover:text-gray-600"
+                :disabled="!authStore.hasPermission('roles.edit')"
               >
                 <PencilIcon class="w-5 h-5" />
               </button>
               <button
-                v-if="!role.is_system_role"
+                v-if="!role.is_protected"
                 @click="deleteRole(role)"
                 class="text-gray-400 hover:text-red-600"
+                :disabled="!authStore.hasPermission('roles.delete')"
               >
                 <TrashIcon class="w-5 h-5" />
               </button>
@@ -268,6 +279,7 @@ interface Role {
   name: string;
   description: string | null;
   is_system_role: boolean;
+  is_protected: boolean;
   created_at: string;
   permissions: string[];
   user_count: number;
@@ -396,43 +408,55 @@ const fetchRoles = async () => {
       throw new Error('No company selected')
     }
 
-    const { data, error: fetchError } = await supabase
-      .from('user_roles')
+    // First fetch roles with their permissions
+    const { data: rolesData, error: rolesError } = await supabase
+      .from('roles')
       .select(`
-        role_id,
-        count(*)
+        *,
+        role_permissions (
+          permission_key
+        )
       `)
       .eq('company_id', authStore.currentCompanyId)
-      .group('role_id')
 
-    if (fetchError) {
-      throw fetchError
+    if (rolesError) {
+      throw rolesError
     }
 
-    if (!data) {
+    if (!rolesData) {
       roles.value = []
       return
     }
 
-    // Map the data to include role details
-    const roleIds = data.map(item => item.role_id)
-    if (roleIds.length > 0) {
-      const { data: roleData, error: roleError } = await supabase
-        .from('roles')
-        .select('*')
-        .in('id', roleIds)
+    // Get user counts for each role
+    const roleIds = rolesData.map(role => role.id)
+    const { data: userCounts, error: countError } = await supabase
+      .from('user_roles')
+      .select('role_id')
+      .eq('company_id', authStore.currentCompanyId)
+      .in('role_id', roleIds)
 
-      if (roleError) {
-        throw roleError
-      }
-
-      roles.value = roleData.map(role => ({
-        ...role,
-        user_count: data.find(item => item.role_id === role.id)?.count || 0
-      }))
-    } else {
-      roles.value = []
+    if (countError) {
+      throw countError
     }
+
+    // Count occurrences of each role_id
+    const userCountMap = (userCounts || []).reduce((acc, curr) => {
+      acc[curr.role_id] = (acc[curr.role_id] || 0) + 1
+      return acc
+    }, {} as Record<string, number>)
+
+    // Transform the data
+    roles.value = rolesData.map(role => ({
+      id: role.id,
+      name: role.name,
+      description: role.description,
+      is_system_role: role.is_system_role,
+      is_protected: role.is_protected,
+      created_at: role.created_at,
+      permissions: role.role_permissions.map(rp => rp.permission_key),
+      user_count: userCountMap[role.id] || 0
+    }))
 
   } catch (err) {
     error.value = err instanceof Error ? err.message : 'Failed to fetch roles'
@@ -461,6 +485,11 @@ const openCreateRoleModal = () => {
 const editRole = (role: Role) => {
   if (!authStore.hasPermission('roles.edit')) {
     error.value = 'You do not have permission to edit roles';
+    return;
+  }
+
+  if (role.is_protected) {
+    error.value = 'Cannot edit protected roles';
     return;
   }
 
@@ -540,6 +569,11 @@ const handleSubmit = async () => {
 const deleteRole = async (role: Role) => {
   if (!authStore.hasPermission('roles.delete')) {
     error.value = 'You do not have permission to delete roles';
+    return;
+  }
+
+  if (role.is_protected) {
+    error.value = 'Cannot delete protected roles';
     return;
   }
 

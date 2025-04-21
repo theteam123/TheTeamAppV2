@@ -78,44 +78,34 @@
           </select>
         </div>
 
-        <!-- Tags -->
-        <div>
-          <label class="block text-sm font-medium text-gray-700">Tags</label>
-          <div class="mt-1">
-            <div class="flex gap-2 mb-2">
-              <div class="relative flex-1">
-                <TagIcon class="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 w-5 h-5" />
-                <input
-                  type="text"
-                  v-model="newTag"
-                  @keyup.enter="addTag"
-                  placeholder="Add or search tags..."
-                  class="block w-full pl-10 pr-3 py-2 border border-gray-300 rounded-md shadow-sm focus:border-green-500 focus:ring-green-500"
-                />
-              </div>
+        <!-- Content Tags -->
+        <div class="col-span-6">
+          <label class="block text-sm font-medium text-gray-700">Content Tags</label>
+          <div class="mt-1 flex rounded-md shadow-sm">
+            <input
+              type="text"
+              v-model="newTag"
+              @keydown.enter="addTag"
+              class="flex-1 min-w-0 block w-full px-3 py-2 rounded-md border-gray-300 focus:border-indigo-500 focus:ring-indigo-500 sm:text-sm"
+              placeholder="Add or search content tags..."
+            />
+          </div>
+          
+          <!-- Selected Tags -->
+          <div class="mt-2 flex flex-wrap gap-2">
+            <div
+              v-for="tagId in formData.contentTags"
+              :key="tagId"
+              class="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium bg-indigo-100 text-indigo-800"
+            >
+              {{ availableContentTags.find(t => t.id === tagId)?.name }}
               <button
                 type="button"
-                @click="addTag"
-                class="px-3 py-2 border border-gray-300 rounded-md shadow-sm text-sm font-medium text-gray-700 bg-white hover:bg-gray-50"
+                @click="removeTag(tagId)"
+                class="ml-1 inline-flex items-center p-0.5 rounded-full text-indigo-400 hover:bg-indigo-200 hover:text-indigo-500 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500"
               >
-                <PlusIcon class="w-5 h-5" />
+                <XIcon class="h-3 w-3" aria-hidden="true" />
               </button>
-            </div>
-            <div class="flex flex-wrap gap-2">
-              <span
-                v-for="tagId in formData.tags"
-                :key="tagId"
-                class="inline-flex items-center px-2.5 py-0.5 rounded-full text-sm font-medium bg-green-100 text-green-800"
-              >
-                {{ availableTags.find(t => t.id === tagId)?.name }}
-                <button
-                  type="button"
-                  @click="removeTag(tagId)"
-                  class="ml-1 text-green-600 hover:text-green-800"
-                >
-                  <XIcon class="w-4 h-4" />
-                </button>
-              </span>
             </div>
           </div>
         </div>
@@ -205,7 +195,7 @@ interface FormData {
   url: string;
   description: string;
   contentType: string;
-  tags: string[];
+  contentTags: string[];
   rolePermissions: Record<string, RolePermission>;
 }
 
@@ -223,7 +213,7 @@ const authStore = useAuthStore();
 const loading = ref(false);
 const error = ref<string | null>(null);
 const roles = ref<Role[]>([]);
-const availableTags = ref<any[]>([]);
+const availableContentTags = ref<any[]>([]);
 const newTag = ref('');
 
 const formData = ref<FormData>({
@@ -231,7 +221,7 @@ const formData = ref<FormData>({
   url: props.contentData?.url || '',
   description: props.contentData?.description || '',
   contentType: props.contentData?.contentType || '',
-  tags: props.contentData?.tags || [],
+  contentTags: props.contentData?.contentTags || [],
   rolePermissions: {}
 });
 
@@ -314,60 +304,53 @@ watch(() => authStore.currentCompanyId, (newCompanyId) => {
   }
 });
 
-const fetchTags = async () => {
-  if (!authStore.currentCompanyId) return;
-
+const fetchContentTags = async () => {
   try {
-    const { data, error: fetchError } = await supabase
-      .from('tags')
-      .select('id, name')
-      .eq('company_id', authStore.currentCompanyId)
+    const { data, error: err } = await supabase
+      .from('content_tags')
+      .select('*')
       .order('name');
 
-    if (fetchError) throw fetchError;
-    availableTags.value = data || [];
+    if (err) throw err;
+    availableContentTags.value = data || [];
   } catch (err) {
-    console.error('Error fetching tags:', err);
-    error.value = 'Failed to load tags. Please try again.';
+    console.error('Error fetching content tags:', err);
+    error.value = 'Failed to load content tags. Please try again.';
   }
 };
 
 const addTag = async () => {
   if (!newTag.value.trim()) return;
 
-  const existingTag = availableTags.value.find(
+  const existingTag = availableContentTags.value.find(
     tag => tag.name.toLowerCase() === newTag.value.toLowerCase()
   );
 
   if (existingTag) {
-    if (!formData.value.tags.includes(existingTag.id)) {
-      formData.value.tags.push(existingTag.id);
+    if (!formData.value.contentTags.includes(existingTag.id)) {
+      formData.value.contentTags.push(existingTag.id);
     }
   } else {
-    try {
-      const { data, error } = await supabase
-        .from('tags')
-        .insert({
-          name: newTag.value,
-          company_id: authStore.currentCompanyId
-        })
-        .select()
-        .single();
+    const { data, error: err } = await supabase
+      .from('content_tags')
+      .insert({ name: newTag.value.trim() })
+      .select()
+      .single();
 
-      if (error) throw error;
-      availableTags.value.push(data);
-      formData.value.tags.push(data.id);
-    } catch (err) {
+    if (err) {
       console.error('Error creating tag:', err);
-      error.value = 'Failed to create tag. Please try again.';
+      return;
     }
+
+    availableContentTags.value.push(data);
+    formData.value.contentTags.push(data.id);
   }
 
   newTag.value = '';
 };
 
 const removeTag = (tagId: string) => {
-  formData.value.tags = formData.value.tags.filter(id => id !== tagId);
+  formData.value.contentTags = formData.value.contentTags.filter(id => id !== tagId);
 };
 
 const handleSubmit = async () => {
@@ -385,7 +368,7 @@ const handleSubmit = async () => {
       url: formData.value.url,
       description: formData.value.description,
       contentType: formData.value.contentType,
-      tags: formData.value.tags,
+      contentTags: formData.value.contentTags,
       rolePermissions: formData.value.rolePermissions
     };
 
@@ -399,7 +382,7 @@ const handleSubmit = async () => {
 
 onMounted(async () => {
   if (authStore.currentCompanyId) {
-    await Promise.all([fetchRoles(), fetchTags()]);
+    await Promise.all([fetchRoles(), fetchContentTags()]);
   }
 });
 </script>
